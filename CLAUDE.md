@@ -7,7 +7,7 @@ A token-efficient codebase navigation system. Instead of reading entire files, t
 - **Daemon** (`daemon/`): Python process that watches files, caches AST skeletons, serves TCP queries
 - **MCP Server** (`server/`): TypeScript bridge exposing daemon capabilities as MCP tools
 - **Skill** (`.claude/skills/rlm-navigator/`): Enforces the recursive navigation workflow
-- **Sub-agent** (`.claude/agents/rlm-subcall.md`): Haiku agent for batch skeleton analysis
+- **Sub-agent** (`.claude/agents/rlm-subcall.md`): Haiku agent for chunk analysis with structured output
 
 ## Token Conservation Rules
 
@@ -24,9 +24,32 @@ A token-efficient codebase navigation system. Instead of reading entire files, t
 |------|---------|
 | `daemon/squeezer.py` | Multi-language AST parser (tree-sitter) |
 | `daemon/rlm_daemon.py` | File watcher + TCP server + cache |
-| `server/src/index.ts` | MCP server with 5 tools |
+| `daemon/rlm_repl.py` | Stateful REPL with pickle persistence + helpers |
+| `server/src/index.ts` | MCP server with 10 tools (5 nav + 5 REPL) |
 | `.claude/skills/rlm-navigator/SKILL.md` | Navigation workflow enforcement |
-| `.claude/agents/rlm-subcall.md` | Haiku sub-agent for skeleton analysis |
+| `.claude/agents/rlm-subcall.md` | Haiku sub-agent for chunk analysis |
+
+## REPL Tools
+
+The REPL provides a stateful Python environment persisted via pickle:
+
+| MCP Tool | Description |
+|----------|-------------|
+| `rlm_repl_init` | Initialize fresh REPL state |
+| `rlm_repl_exec` | Execute Python code (variables persist) |
+| `rlm_repl_status` | Check variables, buffers, exec count |
+| `rlm_repl_reset` | Clear all state |
+| `rlm_repl_export` | Export accumulated buffers |
+
+### Built-in Helpers (available in `rlm_repl_exec`)
+
+| Helper | Signature | Purpose |
+|--------|-----------|---------|
+| `peek` | `peek(file_path, start=1, end=None)` | Read numbered lines from file |
+| `grep` | `grep(pattern, path=".", max_results=50)` | Regex search across files |
+| `chunk_indices` | `chunk_indices(file_path, size=200, overlap=20)` | Compute chunk boundaries |
+| `write_chunks` | `write_chunks(file_path, out_dir=None, size=200, overlap=20)` | Write chunks to disk |
+| `add_buffer` | `add_buffer(key, text)` | Accumulate findings in named buffers |
 
 ## Development
 
@@ -44,8 +67,11 @@ claude mcp add rlm-navigator -- node /absolute/path/to/server/build/index.js
 ## Testing
 
 ```bash
-# Squeezer tests
+# All daemon tests (squeezer + daemon + REPL)
 cd daemon && python -m pytest tests/ -v
+
+# REPL tests only
+cd daemon && python -m pytest tests/test_repl.py -v
 
 # Manual daemon test
 python rlm_daemon.py --root . &

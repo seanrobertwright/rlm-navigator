@@ -22,6 +22,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 from squeezer import squeeze, find_symbol, supported_languages, _detect_language, EXT_MAP
+from rlm_repl import RLMRepl
 
 DEFAULT_PORT = 9177
 IGNORED_DIRS = {
@@ -198,7 +199,7 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
     return results
 
 
-def handle_request(data: bytes, cache: SkeletonCache, root: str) -> bytes:
+def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None) -> bytes:
     """Process a JSON request and return a JSON response."""
     try:
         req = json.loads(data.decode("utf-8"))
@@ -256,11 +257,42 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str) -> bytes:
             "languages": supported_languages(),
         }).encode("utf-8")
 
+    elif action == "repl_init":
+        if repl is None:
+            return json.dumps({"error": "REPL not available"}).encode("utf-8")
+        result = repl.init()
+        return json.dumps(result).encode("utf-8")
+
+    elif action == "repl_exec":
+        if repl is None:
+            return json.dumps({"error": "REPL not available"}).encode("utf-8")
+        code = req.get("code", "")
+        result = repl.exec(code)
+        return json.dumps(result).encode("utf-8")
+
+    elif action == "repl_status":
+        if repl is None:
+            return json.dumps({"error": "REPL not available"}).encode("utf-8")
+        result = repl.status()
+        return json.dumps(result).encode("utf-8")
+
+    elif action == "repl_reset":
+        if repl is None:
+            return json.dumps({"error": "REPL not available"}).encode("utf-8")
+        result = repl.reset()
+        return json.dumps(result).encode("utf-8")
+
+    elif action == "repl_export_buffers":
+        if repl is None:
+            return json.dumps({"error": "REPL not available"}).encode("utf-8")
+        result = repl.export_buffers()
+        return json.dumps(result).encode("utf-8")
+
     else:
         return json.dumps({"error": f"Unknown action: {action}"}).encode("utf-8")
 
 
-def handle_client(conn: socket.socket, cache: SkeletonCache, root: str):
+def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None):
     """Handle a single TCP client connection."""
     try:
         # Read data with a simple length-prefix or newline protocol
@@ -283,7 +315,7 @@ def handle_client(conn: socket.socket, cache: SkeletonCache, root: str):
             conn.sendall(b"ALIVE")
             return
 
-        response = handle_request(data, cache, root)
+        response = handle_request(data, cache, root, repl)
         conn.sendall(response)
     except socket.timeout:
         # Bare connection for health check
@@ -302,6 +334,7 @@ def run_server(root: str, port: int):
     """Start the TCP server and file watcher."""
     cache = SkeletonCache()
     root_path = str(Path(root).resolve())
+    repl = RLMRepl(root_path)
 
     # Start file watcher
     handler = RLMEventHandler(cache, root_path)
@@ -324,7 +357,7 @@ def run_server(root: str, port: int):
             conn, addr = server.accept()
             thread = threading.Thread(
                 target=handle_client,
-                args=(conn, cache, root_path),
+                args=(conn, cache, root_path, repl),
                 daemon=True,
             )
             thread.start()

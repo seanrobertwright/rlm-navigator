@@ -3,6 +3,7 @@
  * RLM Navigator MCP Server
  *
  * Exposes codebase navigation tools (get_status, rlm_tree, rlm_map, rlm_drill, rlm_search)
+ * and REPL tools (rlm_repl_init, rlm_repl_exec, rlm_repl_status, rlm_repl_reset, rlm_repl_export)
  * that communicate with the Python daemon over TCP.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -13,6 +14,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 const DAEMON_HOST = "127.0.0.1";
 const DAEMON_PORT = parseInt(process.env.RLM_DAEMON_PORT || "9177", 10);
+const MAX_RESPONSE_CHARS = parseInt(process.env.RLM_MAX_RESPONSE || "8000", 10);
+// ---------------------------------------------------------------------------
+// Output truncation
+// ---------------------------------------------------------------------------
+function truncateResponse(text, maxChars = MAX_RESPONSE_CHARS) {
+    if (text.length <= maxChars)
+        return text;
+    const remaining = text.length - maxChars;
+    const tokensEst = Math.round(remaining / 4);
+    return text.slice(0, maxChars) + `\n... (truncated, ${remaining} more chars, ~${tokensEst} tokens)`;
+}
 // ---------------------------------------------------------------------------
 // TCP client for daemon communication
 // ---------------------------------------------------------------------------
@@ -81,7 +93,7 @@ function readLines(filePath, startLine, endLine) {
 // ---------------------------------------------------------------------------
 const server = new McpServer({
     name: "rlm-navigator",
-    version: "1.0.0",
+    version: "2.0.0",
 });
 // --- get_status ---
 server.tool("get_status", "Check if the RLM daemon is running and responsive", {}, async () => {
@@ -146,7 +158,7 @@ server.tool("rlm_tree", "Get directory listing with file types and sizes (no fil
             content: [
                 {
                     type: "text",
-                    text: formatTree(result.tree, ""),
+                    text: truncateResponse(formatTree(result.tree, "")),
                 },
             ],
         };
@@ -178,7 +190,7 @@ server.tool("rlm_map", "Get structural skeleton of a file (signatures + docstrin
             };
         }
         return {
-            content: [{ type: "text", text: result.skeleton }],
+            content: [{ type: "text", text: truncateResponse(result.skeleton) }],
         };
     }
     catch (err) {
@@ -226,7 +238,7 @@ server.tool("rlm_drill", "Surgically read only a specific symbol's implementatio
             content: [
                 {
                     type: "text",
-                    text: `# ${symbol} in ${filePath} (L${findResult.start_line}-${findResult.end_line})\n\n${code}`,
+                    text: truncateResponse(`# ${symbol} in ${filePath} (L${findResult.start_line}-${findResult.end_line})\n\n${code}`),
                 },
             ],
         };
@@ -282,7 +294,7 @@ server.tool("rlm_search", "Search for a symbol name across all files in a direct
             content: [
                 {
                     type: "text",
-                    text: `Found "${query}" in ${result.results.length} file(s):\n\n${output}`,
+                    text: truncateResponse(`Found "${query}" in ${result.results.length} file(s):\n\n${output}`),
                 },
             ],
         };
@@ -294,6 +306,160 @@ server.tool("rlm_search", "Search for a symbol name across all files in a direct
                     type: "text",
                     text: `Error: ${err.message}. Is the daemon running?`,
                 },
+            ],
+            isError: true,
+        };
+    }
+});
+// ---------------------------------------------------------------------------
+// REPL Tools
+// ---------------------------------------------------------------------------
+// --- rlm_repl_init ---
+server.tool("rlm_repl_init", "Initialize the stateful Python REPL. Clears any existing state and creates a fresh environment.", {}, async () => {
+    try {
+        const result = await queryDaemon({ action: "repl_init" });
+        if (result.error) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true,
+            };
+        }
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: "REPL initialized. Helpers available: peek(), grep(), chunk_indices(), write_chunks(), add_buffer()",
+                },
+            ],
+        };
+    }
+    catch (err) {
+        return {
+            content: [
+                { type: "text", text: `Daemon error: ${err.message}. Is the daemon running?` },
+            ],
+            isError: true,
+        };
+    }
+});
+// --- rlm_repl_exec ---
+server.tool("rlm_repl_exec", `Execute Python code in the stateful REPL. Variables persist across calls. Built-in helpers:
+- peek(file_path, start=1, end=None) — read lines from file relative to root
+- grep(pattern, path=".", max_results=50) — regex search across files
+- chunk_indices(file_path, size=200, overlap=20) — compute chunk boundaries
+- write_chunks(file_path, out_dir=None, size=200, overlap=20) — write chunks to disk
+- add_buffer(key, text) — accumulate findings in named buffers`, {
+    code: z.string().describe("Python code to execute in the REPL"),
+}, async ({ code }) => {
+    try {
+        const result = await queryDaemon({ action: "repl_exec", code });
+        if (result.error && !result.output) {
+            return {
+                content: [{ type: "text", text: `Error:\n${result.error}` }],
+                isError: true,
+            };
+        }
+        let text = "";
+        if (result.output)
+            text += result.output;
+        if (result.error)
+            text += `\nError:\n${result.error}`;
+        if (result.variables && result.variables.length > 0) {
+            text += `\nVariables: ${result.variables.join(", ")}`;
+        }
+        return {
+            content: [{ type: "text", text: truncateResponse(text.trim()) }],
+        };
+    }
+    catch (err) {
+        return {
+            content: [
+                { type: "text", text: `Daemon error: ${err.message}. Is the daemon running?` },
+            ],
+            isError: true,
+        };
+    }
+});
+// --- rlm_repl_status ---
+server.tool("rlm_repl_status", "Check the current state of the REPL — variables, buffer counts, execution count.", {}, async () => {
+    try {
+        const result = await queryDaemon({ action: "repl_status" });
+        if (result.error) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true,
+            };
+        }
+        const lines = [
+            `Variables: ${(result.variables || []).join(", ") || "(none)"}`,
+            `Buffers: ${JSON.stringify(result.buffer_count || {})}`,
+            `Exec count: ${result.exec_count || 0}`,
+        ];
+        return {
+            content: [{ type: "text", text: lines.join("\n") }],
+        };
+    }
+    catch (err) {
+        return {
+            content: [
+                { type: "text", text: `Daemon error: ${err.message}. Is the daemon running?` },
+            ],
+            isError: true,
+        };
+    }
+});
+// --- rlm_repl_reset ---
+server.tool("rlm_repl_reset", "Clear all REPL state — variables, buffers, execution history.", {}, async () => {
+    try {
+        const result = await queryDaemon({ action: "repl_reset" });
+        if (result.error) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true,
+            };
+        }
+        return {
+            content: [{ type: "text", text: "REPL state cleared." }],
+        };
+    }
+    catch (err) {
+        return {
+            content: [
+                { type: "text", text: `Daemon error: ${err.message}. Is the daemon running?` },
+            ],
+            isError: true,
+        };
+    }
+});
+// --- rlm_repl_export ---
+server.tool("rlm_repl_export", "Export all accumulated buffers from the REPL. Use after add_buffer() calls to retrieve collected findings.", {}, async () => {
+    try {
+        const result = await queryDaemon({ action: "repl_export_buffers" });
+        if (result.error) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true,
+            };
+        }
+        const buffers = result.buffers || {};
+        if (Object.keys(buffers).length === 0) {
+            return {
+                content: [{ type: "text", text: "No buffers accumulated." }],
+            };
+        }
+        const output = Object.entries(buffers)
+            .map(([key, texts]) => {
+            return `## ${key} (${texts.length} entries)\n${texts.map((t, i) => `[${i}] ${t}`).join("\n")}`;
+        })
+            .join("\n\n");
+        return {
+            content: [{ type: "text", text: truncateResponse(output) }],
+        };
+    }
+    catch (err) {
+        return {
+            content: [
+                { type: "text", text: `Daemon error: ${err.message}. Is the daemon running?` },
             ],
             isError: true,
         };

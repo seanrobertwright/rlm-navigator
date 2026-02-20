@@ -12,7 +12,9 @@ AI coding assistants waste context window on full file reads. A 500-line file co
 
 ## Solution
 
-RLM Navigator provides 5 MCP tools that enforce a surgical navigation workflow:
+RLM Navigator provides 10 MCP tools that enforce a surgical navigation workflow:
+
+**Navigation tools:**
 
 | Tool | Purpose |
 |------|---------|
@@ -22,7 +24,19 @@ RLM Navigator provides 5 MCP tools that enforce a surgical navigation workflow:
 | `rlm_drill` | Read specific symbol implementation |
 | `rlm_search` | Find symbols across files |
 
-The workflow: **tree → map → drill → edit**. Each step loads only what's needed.
+**REPL tools** (stateful Python environment with persistence):
+
+| Tool | Purpose |
+|------|---------|
+| `rlm_repl_init` | Initialize the stateful REPL |
+| `rlm_repl_exec` | Execute Python code (variables persist across calls) |
+| `rlm_repl_status` | Check variables, buffers, execution count |
+| `rlm_repl_reset` | Clear all REPL state |
+| `rlm_repl_export` | Export accumulated buffers |
+
+Built-in REPL helpers: `peek()` (read lines), `grep()` (regex search), `chunk_indices()` / `write_chunks()` (file chunking), `add_buffer()` (accumulate findings).
+
+The workflow: **tree → map → drill → edit**. For complex analysis: **init → exec with helpers → export buffers**. Each step loads only what's needed.
 
 ## Architecture
 
@@ -106,6 +120,7 @@ python benchmark.py --root /path/to/project --query "your_symbol" --tree-path "s
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `RLM_DAEMON_PORT` | `9177` | TCP port for daemon communication |
+| `RLM_MAX_RESPONSE` | `8000` | Max chars before output truncation |
 
 ## Development
 
@@ -120,9 +135,10 @@ python daemon/rlm_daemon.py --root .
 ## How It Works
 
 1. **Daemon** watches your project with `watchdog`, parses files with `tree-sitter`, caches AST skeletons
-2. **MCP Server** bridges Claude Code to the daemon via TCP JSON protocol
-3. **Skill** enforces the navigation workflow: tree → map → drill → edit
-4. **Sub-agent** (Haiku) analyzes skeletons to identify relevant symbols in large codebases
+2. **REPL** provides a pickle-persisted Python environment with codebase helpers (peek, grep, chunking, buffers)
+3. **MCP Server** bridges Claude Code to the daemon via TCP JSON protocol, with automatic output truncation
+4. **Skill** enforces the navigation workflow (tree → map → drill → edit) and the chunk-delegate-synthesize workflow for large analyses
+5. **Sub-agent** (Haiku) analyzes file chunks with structured output — relevance rankings, missing items, and suggested next queries
 
 ## Inspired By
 
