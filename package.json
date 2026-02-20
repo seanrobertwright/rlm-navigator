@@ -12,6 +12,8 @@
     "server/src/",
     "server/package.json",
     "server/tsconfig.json",
-    "templates/"
+    "templates/",
+    ".claude/skills/",
+    ".claude/agents/"
   ]
 }

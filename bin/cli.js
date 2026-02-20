@@ -82,10 +82,21 @@ async function install() {
     process.exit(1);
   }
 
-  // 1. Copy daemon/ and server/ into .rlm/
-  console.log("[1/5] Copying daemon and server into .rlm/ ...");
+  // 1. Copy daemon/, server/, and .claude/ into .rlm/ and project
+  console.log("[1/5] Copying daemon, server, and skills ...");
   copyDirSync(path.join(PKG_ROOT, "daemon"), path.join(RLM_DIR, "daemon"));
   copyDirSync(path.join(PKG_ROOT, "server"), path.join(RLM_DIR, "server"));
+
+  // Copy .claude/skills/ and .claude/agents/ into project's .claude/
+  const srcSkills = path.join(PKG_ROOT, ".claude", "skills");
+  const srcAgents = path.join(PKG_ROOT, ".claude", "agents");
+  const destClaude = path.join(CWD, ".claude");
+  if (fs.existsSync(srcSkills)) {
+    copyDirSync(srcSkills, path.join(destClaude, "skills"));
+  }
+  if (fs.existsSync(srcAgents)) {
+    copyDirSync(srcAgents, path.join(destClaude, "agents"));
+  }
   console.log("  Done.\n");
 
   // 2. Install Python deps
@@ -188,7 +199,19 @@ function uninstall() {
     console.log(".rlm/ not found — nothing to remove.\n");
   }
 
-  // 3. Remove CLAUDE.md snippet
+  // 3. Remove .claude/skills/rlm-navigator/ and .claude/agents/rlm-subcall.md
+  const skillDir = path.join(CWD, ".claude", "skills", "rlm-navigator");
+  const agentFile = path.join(CWD, ".claude", "agents", "rlm-subcall.md");
+  if (fs.existsSync(skillDir)) {
+    fs.rmSync(skillDir, { recursive: true, force: true });
+    console.log("Removed .claude/skills/rlm-navigator/");
+  }
+  if (fs.existsSync(agentFile)) {
+    fs.unlinkSync(agentFile);
+    console.log("Removed .claude/agents/rlm-subcall.md");
+  }
+
+  // 4. Remove CLAUDE.md snippet
   const claudeMdPath = path.join(CWD, "CLAUDE.md");
   if (fs.existsSync(claudeMdPath)) {
     const content = fs.readFileSync(claudeMdPath, "utf-8");
