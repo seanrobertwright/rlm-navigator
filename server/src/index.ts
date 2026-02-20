@@ -17,7 +17,29 @@ import { spawn, ChildProcess } from "node:child_process";
 
 const DAEMON_HOST = "127.0.0.1";
 const MAX_RESPONSE_CHARS = parseInt(process.env.RLM_MAX_RESPONSE || "8000", 10);
-const PROJECT_ROOT = process.env.RLM_PROJECT_ROOT || process.cwd();
+
+function resolveProjectRoot(): string {
+  // 1. Explicit env var
+  if (process.env.RLM_PROJECT_ROOT) return process.env.RLM_PROJECT_ROOT;
+
+  // 2. Detect from script location: if running from <project>/.rlm/server/build/index.js,
+  //    walk up to find the .rlm parent
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+  // Normalize for Windows (strip leading / from /C:/...)
+  const normalized = process.platform === "win32" && scriptDir.match(/^\/[A-Za-z]:/)
+    ? scriptDir.slice(1)
+    : scriptDir;
+  const parts = normalized.split(path.sep);
+  const rlmIdx = parts.lastIndexOf(".rlm");
+  if (rlmIdx > 0) {
+    return parts.slice(0, rlmIdx).join(path.sep);
+  }
+
+  // 3. Fallback
+  return process.cwd();
+}
+
+const PROJECT_ROOT = resolveProjectRoot();
 
 let daemonChild: ChildProcess | null = null;
 
