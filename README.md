@@ -40,18 +40,18 @@ The workflow: **tree → map → drill → edit**. For complex analysis: **init 
 
 ## Architecture
 
-```
-┌─────────────┐     TCP/JSON      ┌──────────────┐
-│  MCP Server  │ ───────────────→ │  Python       │
-│  (TypeScript) │ ←─────────────── │  Daemon       │
-└──────┬───────┘                  └──────┬────────┘
-       │                                  │
-       │ stdio                  watchdog  │ tree-sitter
-       │                                  │
-┌──────┴───────┐                  ┌──────┴────────┐
-│  Claude Code  │                 │  File System   │
-│  (AI Client)  │                 │  + AST Cache   │
-└──────────────┘                  └───────────────┘
+```mermaid
+graph TB
+    MCP["MCP Server<br/>(TypeScript)"]
+    Client["Claude Code<br/>(AI Client)"]
+    Daemon["Python Daemon"]
+    FS["File System<br/>+ AST Cache"]
+
+    MCP -->|stdio| Client
+    MCP -->|TCP/JSON| Daemon
+    Daemon -->|watchdog| FS
+    Daemon -->|tree-sitter| FS
+    Daemon -->|cache| FS
 ```
 
 ## Quick Start
