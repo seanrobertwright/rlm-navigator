@@ -83,18 +83,24 @@ class SkeletonCache:
 class RLMEventHandler(FileSystemEventHandler):
     """Watchdog handler that invalidates cache on file changes."""
 
-    def __init__(self, cache: SkeletonCache, root: str):
+    def __init__(self, cache: SkeletonCache, root: str, repl: Optional[RLMRepl] = None):
         self.cache = cache
         self.root = root
+        self.repl = repl
 
     def _should_ignore(self, path: str) -> bool:
         parts = Path(path).parts
         return any(part in IGNORED_DIRS for part in parts)
 
+    def _notify_repl(self, file_path: str):
+        if self.repl:
+            self.repl.invalidate_dependencies(file_path)
+
     def on_modified(self, event: FileSystemEvent):
         if event.is_directory or self._should_ignore(event.src_path):
             return
         self.cache.invalidate(event.src_path)
+        self._notify_repl(event.src_path)
 
     def on_created(self, event: FileSystemEvent):
         if event.is_directory or self._should_ignore(event.src_path):
@@ -105,13 +111,16 @@ class RLMEventHandler(FileSystemEventHandler):
         if event.is_directory or self._should_ignore(event.src_path):
             return
         self.cache.invalidate(event.src_path)
+        self._notify_repl(event.src_path)
 
     def on_moved(self, event):
         if self._should_ignore(event.src_path):
             return
         self.cache.invalidate(event.src_path)
+        self._notify_repl(event.src_path)
         if hasattr(event, "dest_path"):
             self.cache.invalidate(event.dest_path)
+            self._notify_repl(event.dest_path)
 
 
 def build_tree(dir_path: str, root: str, max_depth: int = 4) -> list[dict]:
@@ -337,7 +346,7 @@ def run_server(root: str, port: int):
     repl = RLMRepl(root_path)
 
     # Start file watcher
-    handler = RLMEventHandler(cache, root_path)
+    handler = RLMEventHandler(cache, root_path, repl=repl)
     observer = Observer()
     observer.schedule(handler, root_path, recursive=True)
     observer.start()

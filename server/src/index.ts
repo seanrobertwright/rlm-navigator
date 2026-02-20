@@ -433,6 +433,9 @@ server.tool(
       if (result.variables && result.variables.length > 0) {
         text += `\nVariables: ${result.variables.join(", ")}`;
       }
+      if (result.staleness_warning) {
+        text += formatStalenessWarning(result.staleness_warning);
+      }
       return {
         content: [{ type: "text" as const, text: truncateResponse(text.trim()) }],
       };
@@ -466,6 +469,9 @@ server.tool(
         `Buffers: ${JSON.stringify(result.buffer_count || {})}`,
         `Exec count: ${result.exec_count || 0}`,
       ];
+      if (result.staleness) {
+        lines.push(formatStalenessWarning(result.staleness));
+      }
       return {
         content: [{ type: "text" as const, text: lines.join("\n") }],
       };
@@ -550,6 +556,23 @@ server.tool(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function formatStalenessWarning(staleness: any): string {
+  const lines: string[] = ["\n⚠ STALE DATA WARNING:"];
+  if (staleness.variables) {
+    for (const [varName, files] of Object.entries(staleness.variables) as [string, any[]][]) {
+      const fileList = files.map((f: any) => `${f.file} (${f.reason})`).join(", ");
+      lines.push(`  var '${varName}': ${fileList}`);
+    }
+  }
+  if (staleness.buffers) {
+    for (const [bufName, files] of Object.entries(staleness.buffers) as [string, any[]][]) {
+      const fileList = files.map((f: any) => `${f.file} (${f.reason})`).join(", ");
+      lines.push(`  buffer '${bufName}': ${fileList}`);
+    }
+  }
+  return lines.join("\n");
+}
 
 function formatTree(entries: any[], indent: string): string {
   const lines: string[] = [];

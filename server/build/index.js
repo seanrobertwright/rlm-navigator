@@ -367,6 +367,9 @@ server.tool("rlm_repl_exec", `Execute Python code in the stateful REPL. Variable
         if (result.variables && result.variables.length > 0) {
             text += `\nVariables: ${result.variables.join(", ")}`;
         }
+        if (result.staleness_warning) {
+            text += formatStalenessWarning(result.staleness_warning);
+        }
         return {
             content: [{ type: "text", text: truncateResponse(text.trim()) }],
         };
@@ -395,6 +398,9 @@ server.tool("rlm_repl_status", "Check the current state of the REPL — variable
             `Buffers: ${JSON.stringify(result.buffer_count || {})}`,
             `Exec count: ${result.exec_count || 0}`,
         ];
+        if (result.staleness) {
+            lines.push(formatStalenessWarning(result.staleness));
+        }
         return {
             content: [{ type: "text", text: lines.join("\n") }],
         };
@@ -468,6 +474,22 @@ server.tool("rlm_repl_export", "Export all accumulated buffers from the REPL. Us
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+function formatStalenessWarning(staleness) {
+    const lines = ["\n⚠ STALE DATA WARNING:"];
+    if (staleness.variables) {
+        for (const [varName, files] of Object.entries(staleness.variables)) {
+            const fileList = files.map((f) => `${f.file} (${f.reason})`).join(", ");
+            lines.push(`  var '${varName}': ${fileList}`);
+        }
+    }
+    if (staleness.buffers) {
+        for (const [bufName, files] of Object.entries(staleness.buffers)) {
+            const fileList = files.map((f) => `${f.file} (${f.reason})`).join(", ");
+            lines.push(`  buffer '${bufName}': ${fileList}`);
+        }
+    }
+    return lines.join("\n");
+}
 function formatTree(entries, indent) {
     const lines = [];
     for (const entry of entries) {

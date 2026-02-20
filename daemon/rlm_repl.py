@@ -26,6 +26,25 @@ from typing import Optional
 MAX_OUTPUT_CHARS = 8000
 
 
+class _DependencyTracker:
+    """Tracks file accesses during a single exec() call."""
+
+    def __init__(self, root: str):
+        self._root = root
+        self._files: dict[str, float] = {}
+
+    def track_file(self, rel_path: str, abs_path: str):
+        """Record a file access with its current mtime."""
+        try:
+            mtime = os.path.getmtime(abs_path)
+        except OSError:
+            mtime = 0.0
+        self._files[rel_path] = mtime
+
+    def get_tracked(self) -> dict[str, float]:
+        return dict(self._files)
+
+
 class RLMRepl:
     """Stateful Python REPL with pickle persistence and codebase helpers."""
 
@@ -54,17 +73,26 @@ class RLMRepl:
             self._namespace["_rlm_buffers_"] = {}
         if "_rlm_meta_" not in self._namespace:
             self._namespace["_rlm_meta_"] = {"exec_count": 0, "last_exec": None}
+        if "_rlm_deps_" not in self._namespace:
+            self._namespace["_rlm_deps_"] = {"variables": {}, "buffers": {}}
 
     def _inject_helpers(self):
         """Inject codebase helper functions into the namespace."""
         root = self.root
         ns = self._namespace
 
+        def _get_tracker() -> Optional[_DependencyTracker]:
+            return ns.get("_rlm_tracker_")
+
         def peek(file_path: str, start: int = 1, end: Optional[int] = None) -> str:
             """Read lines from a file relative to project root."""
             abs_path = os.path.join(root, file_path)
             if not os.path.isfile(abs_path):
                 return f"Error: file not found: {file_path}"
+            tracker = _get_tracker()
+            if tracker:
+                rel = file_path.replace("\\", "/")
+                tracker.track_file(rel, abs_path)
             with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
             if end is None:
@@ -85,6 +113,7 @@ class RLMRepl:
                 regex = re.compile(pattern)
             except re.error as e:
                 return f"Error: invalid regex: {e}"
+            tracker = _get_tracker()
             results = []
             for dirpath, dirnames, filenames in os.walk(search_root):
                 # Skip ignored directories
@@ -99,6 +128,8 @@ class RLMRepl:
                         with open(fpath, "r", encoding="utf-8", errors="replace") as f:
                             for i, line in enumerate(f, 1):
                                 if regex.search(line):
+                                    if tracker:
+                                        tracker.track_file(rel, fpath)
                                     results.append(f"{rel}:{i}:{line.rstrip()}")
                                     if len(results) >= max_results:
                                         return "\n".join(results)
@@ -111,6 +142,10 @@ class RLMRepl:
             abs_path = os.path.join(root, file_path)
             if not os.path.isfile(abs_path):
                 return []
+            tracker = _get_tracker()
+            if tracker:
+                rel = file_path.replace("\\", "/")
+                tracker.track_file(rel, abs_path)
             with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
                 total = sum(1 for _ in f)
             chunks = []
@@ -133,6 +168,10 @@ class RLMRepl:
             abs_path = os.path.join(root, file_path)
             if not os.path.isfile(abs_path):
                 return []
+            tracker = _get_tracker()
+            if tracker:
+                rel = file_path.replace("\\", "/")
+                tracker.track_file(rel, abs_path)
             if out_dir is None:
                 out_dir = os.path.join(root, ".claude", "rlm_state", "chunks")
             os.makedirs(out_dir, exist_ok=True)
@@ -160,6 +199,14 @@ class RLMRepl:
                 buffers[key] = []
             buffers[key].append(text)
             ns["_rlm_buffers_"] = buffers
+            # Merge tracked files into buffer deps
+            tracker = _get_tracker()
+            if tracker:
+                deps = ns.get("_rlm_deps_", {"variables": {}, "buffers": {}})
+                buf_deps = deps["buffers"].get(key, {"files": {}})
+                buf_deps["files"].update(tracker.get_tracked())
+                deps["buffers"][key] = buf_deps
+                ns["_rlm_deps_"] = deps
 
         self._namespace["peek"] = peek
         self._namespace["grep"] = grep
@@ -172,7 +219,7 @@ class RLMRepl:
         os.makedirs(self.state_dir, exist_ok=True)
         safe = {}
         for k, v in self._namespace.items():
-            if k in ("peek", "grep", "chunk_indices", "write_chunks", "add_buffer"):
+            if k in ("peek", "grep", "chunk_indices", "write_chunks", "add_buffer", "_rlm_tracker_"):
                 continue
             try:
                 pickle.dumps(v)
@@ -195,6 +242,11 @@ class RLMRepl:
     def exec(self, code: str) -> dict:
         """Execute Python code in the REPL namespace."""
         with self._lock:
+            # Create fresh tracker and snapshot existing vars
+            tracker = _DependencyTracker(self.root)
+            self._namespace["_rlm_tracker_"] = tracker
+            vars_before = set(self._namespace.keys())
+
             stdout_capture = io.StringIO()
             old_stdout = sys.stdout
             error = None
@@ -211,6 +263,31 @@ class RLMRepl:
                 remaining = len(output) - MAX_OUTPUT_CHARS
                 tokens_est = remaining // 4
                 output = output[:MAX_OUTPUT_CHARS] + f"\n... (truncated, {remaining} more chars, ~{tokens_est} tokens)"
+
+            # Merge tracked files into deps for new/modified variables
+            tracked = tracker.get_tracked()
+            if tracked:
+                deps = self._namespace.get("_rlm_deps_", {"variables": {}, "buffers": {}})
+                vars_after = set(self._namespace.keys())
+                new_or_modified = (vars_after - vars_before) | {
+                    k for k in vars_after
+                    if not k.startswith("_") and k not in (
+                        "peek", "grep", "chunk_indices", "write_chunks", "add_buffer"
+                    )
+                    and k in vars_before
+                }
+                for var_name in new_or_modified:
+                    if var_name.startswith("_") or var_name in (
+                        "peek", "grep", "chunk_indices", "write_chunks", "add_buffer"
+                    ):
+                        continue
+                    var_deps = deps["variables"].get(var_name, {"files": {}})
+                    var_deps["files"].update(tracked)
+                    deps["variables"][var_name] = var_deps
+                self._namespace["_rlm_deps_"] = deps
+
+            # Clean up tracker
+            self._namespace.pop("_rlm_tracker_", None)
 
             meta = self._namespace.get("_rlm_meta_", {})
             meta["exec_count"] = meta.get("exec_count", 0) + 1
@@ -234,6 +311,12 @@ class RLMRepl:
             }
             if error:
                 result["error"] = error
+
+            # Check staleness
+            staleness = self._check_staleness()
+            if staleness:
+                result["staleness_warning"] = staleness
+
             return result
 
     def status(self) -> dict:
@@ -247,11 +330,15 @@ class RLMRepl:
             ]
             buffers = self._namespace.get("_rlm_buffers_", {})
             meta = self._namespace.get("_rlm_meta_", {})
-            return {
+            result = {
                 "variables": variables,
                 "buffer_count": {k: len(v) for k, v in buffers.items()},
                 "exec_count": meta.get("exec_count", 0),
             }
+            staleness = self._check_staleness()
+            if staleness:
+                result["staleness"] = staleness
+            return result
 
     def reset(self) -> dict:
         """Delete all state and start fresh."""
@@ -262,6 +349,68 @@ class RLMRepl:
             self._ensure_meta()
             self._inject_helpers()
             return {"success": True}
+
+    def _check_staleness(self) -> Optional[dict]:
+        """Compare stored mtimes vs current. Return stale info or None."""
+        deps = self._namespace.get("_rlm_deps_", {"variables": {}, "buffers": {}})
+        stale_vars = {}
+        stale_buffers = {}
+
+        for var_name, var_info in deps.get("variables", {}).items():
+            stale_files = []
+            for rel_path, stored_mtime in var_info.get("files", {}).items():
+                abs_path = os.path.join(self.root, rel_path)
+                if not os.path.exists(abs_path):
+                    stale_files.append({"file": rel_path, "reason": "deleted"})
+                else:
+                    try:
+                        current_mtime = os.path.getmtime(abs_path)
+                        if current_mtime != stored_mtime:
+                            stale_files.append({"file": rel_path, "reason": "modified"})
+                    except OSError:
+                        stale_files.append({"file": rel_path, "reason": "inaccessible"})
+            if stale_files:
+                stale_vars[var_name] = stale_files
+
+        for buf_name, buf_info in deps.get("buffers", {}).items():
+            stale_files = []
+            for rel_path, stored_mtime in buf_info.get("files", {}).items():
+                abs_path = os.path.join(self.root, rel_path)
+                if not os.path.exists(abs_path):
+                    stale_files.append({"file": rel_path, "reason": "deleted"})
+                else:
+                    try:
+                        current_mtime = os.path.getmtime(abs_path)
+                        if current_mtime != stored_mtime:
+                            stale_files.append({"file": rel_path, "reason": "modified"})
+                    except OSError:
+                        stale_files.append({"file": rel_path, "reason": "inaccessible"})
+            if stale_files:
+                stale_buffers[buf_name] = stale_files
+
+        if not stale_vars and not stale_buffers:
+            return None
+        result = {}
+        if stale_vars:
+            result["variables"] = stale_vars
+        if stale_buffers:
+            result["buffers"] = stale_buffers
+        return result
+
+    def invalidate_dependencies(self, file_path: str) -> list[str]:
+        """Mark deps stale for a changed file. Returns affected var/buffer names."""
+        abs_path = str(Path(file_path).resolve())
+        rel_path = os.path.relpath(abs_path, self.root).replace("\\", "/")
+        affected = []
+        with self._lock:
+            deps = self._namespace.get("_rlm_deps_", {"variables": {}, "buffers": {}})
+            for var_name, var_info in deps.get("variables", {}).items():
+                if rel_path in var_info.get("files", {}):
+                    affected.append(f"var:{var_name}")
+            for buf_name, buf_info in deps.get("buffers", {}).items():
+                if rel_path in buf_info.get("files", {}):
+                    affected.append(f"buffer:{buf_name}")
+        return affected
 
     def export_buffers(self) -> dict:
         """Export all accumulated buffers."""
