@@ -81,6 +81,26 @@ Tree-sitter powered parsing for: **Python, JavaScript, TypeScript, Go, Rust, Jav
 
 Unsupported file types get a graceful fallback (first 20 lines + line count).
 
+## Benchmarks
+
+Benchmarked against [tiangolo/fastapi](https://github.com/tiangolo/fastapi) using `benchmark.py`. The traditional approach greps for matches then reads every matching file in full. RLM navigates surgically: tree the structure, search skeletons, map only relevant files, drill only needed symbols.
+
+| Query | Approach | Files | Tokens | Reduction | Efficiency |
+|---|---|---|---|---|---|
+| `authenticate` | Traditional | 42 full reads | 47,131 | — | — |
+| `authenticate` | RLM (full repo tree) | 9 maps | 19,109 | 59% | 2.5x |
+| `authenticate` | RLM (targeted tree) | 9 maps | **8,364** | **82%** | **5.6x** |
+| `OAuth2PasswordBearer` | Traditional | 20 full reads | 25,725 | — | — |
+| `OAuth2PasswordBearer` | RLM (full repo tree) | 1 map | 14,012 | 46% | 1.8x |
+| `OAuth2PasswordBearer` | RLM (targeted tree) | 1 map | **3,267** | **87%** | **7.9x** |
+
+Scoping `rlm_tree` to the relevant subdirectory (`--tree-path fastapi/security`) is critical for large repos — it reduces tree overhead from ~11K tokens to 205, making the difference between 2-3x and **6-8x** savings.
+
+```bash
+# Run the benchmark yourself
+python benchmark.py --root /path/to/project --query "your_symbol" --tree-path "src/relevant/dir"
+```
+
 ## Configuration
 
 | Environment Variable | Default | Description |
