@@ -1,3 +1,4 @@
+# Legacy installer. Prefer: npx rlm-navigator@latest install
 # RLM Navigator Installer for Windows
 $ErrorActionPreference = "Stop"
 

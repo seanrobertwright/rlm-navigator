@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+daemon/tests/
+.pytest_cache/
+.claude/
+.git/
+.gitignore
+install.sh
+install.ps1
+benchmark.py

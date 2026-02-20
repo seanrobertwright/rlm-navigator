@@ -61,17 +61,20 @@ graph TB
 
 ## Quick Start
 
-### Install
-
 ```bash
-# Unix/Mac
-./install.sh
-
-# Windows
-.\install.ps1
+npx rlm-navigator@latest install
 ```
 
-### Manual Setup
+This copies the daemon and server into a local `.rlm/` directory, installs dependencies, builds the MCP server, and registers with Claude Code. The daemon **auto-starts** when Claude Code connects — no separate terminal needed.
+
+### Other Commands
+
+```bash
+npx rlm-navigator status      # Check daemon health
+npx rlm-navigator uninstall   # Remove from project
+```
+
+### Manual / Development Setup
 
 ```bash
 # 1. Install Python deps
@@ -82,17 +85,12 @@ cd server && npm install && npm run build
 
 # 3. Register with Claude Code
 claude mcp add rlm-navigator -- node /path/to/server/build/index.js
-```
 
-### Usage
-
-```bash
-# Start the daemon (in a separate terminal)
+# 4. Start the daemon (in a separate terminal)
 python daemon/rlm_daemon.py --root /path/to/your/project
-
-# Now use Claude Code — the rlm_* tools are available
-# Or invoke the /rlm-navigator skill for guided workflow
 ```
+
+Legacy install scripts (`install.sh`, `install.ps1`) are still available for development.
 
 ## Supported Languages
 

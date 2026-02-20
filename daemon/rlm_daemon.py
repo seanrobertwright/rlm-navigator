@@ -28,7 +28,7 @@ DEFAULT_PORT = 9177
 IGNORED_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv",
     "venv", ".env", "dist", "build", ".next", ".nuxt", "target",
-    ".idea", ".vscode", ".DS_Store",
+    ".idea", ".vscode", ".DS_Store", ".rlm",
 }
 IGNORED_PATTERNS = {"*.pyc", "*.pyo", "*.class", "*.o", "*.so", "*.dll"}
 
@@ -351,14 +351,31 @@ def run_server(root: str, port: int):
     observer.schedule(handler, root_path, recursive=True)
     observer.start()
 
-    # Start TCP server
+    # Start TCP server — scan ports if requested port is busy
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("127.0.0.1", port))
+    bound_port = None
+    for try_port in range(port, port + 20):
+        try:
+            server.bind(("127.0.0.1", try_port))
+            bound_port = try_port
+            break
+        except OSError:
+            continue
+    if bound_port is None:
+        print(f"Error: Could not bind to any port in range {port}-{port + 19}", file=sys.stderr)
+        observer.stop()
+        observer.join()
+        sys.exit(1)
     server.listen(5)
 
+    # Write port file if .rlm/ directory exists (npx install mode)
+    port_file = Path(root_path) / ".rlm" / "port"
+    if port_file.parent.is_dir():
+        port_file.write_text(str(bound_port))
+
     print(f"RLM Daemon active — watching: {root_path}")
-    print(f"TCP server listening on 127.0.0.1:{port}")
+    print(f"TCP server listening on 127.0.0.1:{bound_port}")
     print(f"Languages available: {', '.join(supported_languages())}")
 
     try:
@@ -373,6 +390,11 @@ def run_server(root: str, port: int):
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        if port_file.exists():
+            try:
+                port_file.unlink()
+            except OSError:
+                pass
         observer.stop()
         observer.join()
         server.close()

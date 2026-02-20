@@ -23,11 +23,15 @@ A token-efficient codebase navigation system. Instead of reading entire files, t
 | File | Purpose |
 |------|---------|
 | `daemon/squeezer.py` | Multi-language AST parser (tree-sitter) |
-| `daemon/rlm_daemon.py` | File watcher + TCP server + cache |
+| `daemon/rlm_daemon.py` | File watcher + TCP server + cache (port scanning 9177-9196) |
 | `daemon/rlm_repl.py` | Stateful REPL with pickle persistence + helpers |
-| `server/src/index.ts` | MCP server with 10 tools (5 nav + 5 REPL) |
+| `server/src/index.ts` | MCP server with 10 tools (port discovery via `.rlm/port`, auto-spawn) |
+| `bin/cli.js` | CLI entry point (`npx rlm-navigator install/uninstall/status`) |
+| `templates/CLAUDE_SNIPPET.md` | CLAUDE.md snippet injected during install |
 | `.claude/skills/rlm-navigator/SKILL.md` | Navigation workflow enforcement |
 | `.claude/agents/rlm-subcall.md` | Haiku sub-agent for chunk analysis |
+
+When installed via `npx rlm-navigator install`, files live in `.rlm/` inside the project. The daemon writes its bound port to `.rlm/port`; the MCP server reads this file for port discovery.
 
 ## REPL Tools
 

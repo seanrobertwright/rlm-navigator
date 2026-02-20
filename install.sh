@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Legacy installer. Prefer: npx rlm-navigator@latest install
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -12,9 +12,63 @@ import { z } from "zod";
 import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 const DAEMON_HOST = "127.0.0.1";
-const DAEMON_PORT = parseInt(process.env.RLM_DAEMON_PORT || "9177", 10);
 const MAX_RESPONSE_CHARS = parseInt(process.env.RLM_MAX_RESPONSE || "8000", 10);
+const PROJECT_ROOT = process.env.RLM_PROJECT_ROOT || process.cwd();
+let daemonChild = null;
+function getDaemonPort() {
+    // 1. Env var override
+    if (process.env.RLM_DAEMON_PORT) {
+        return parseInt(process.env.RLM_DAEMON_PORT, 10);
+    }
+    // 2. Read .rlm/port file
+    try {
+        const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
+        const content = fs.readFileSync(portFile, "utf-8").trim();
+        const port = parseInt(content, 10);
+        if (!isNaN(port))
+            return port;
+    }
+    catch {
+        // File doesn't exist or unreadable — fall through
+    }
+    // 3. Default
+    return 9177;
+}
+function spawnDaemon() {
+    if (daemonChild)
+        return; // Already spawned
+    const daemonScript = path.join(PROJECT_ROOT, ".rlm", "daemon", "rlm_daemon.py");
+    if (!fs.existsSync(daemonScript))
+        return; // No .rlm install
+    // Try python, then python3
+    for (const cmd of ["python", "python3"]) {
+        try {
+            const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT], {
+                detached: true,
+                stdio: "ignore",
+            });
+            child.unref();
+            daemonChild = child;
+            return;
+        }
+        catch {
+            continue;
+        }
+    }
+}
+// Kill daemon child on exit if we spawned it
+process.on("exit", () => {
+    if (daemonChild && daemonChild.pid) {
+        try {
+            process.kill(daemonChild.pid);
+        }
+        catch {
+            // Already dead
+        }
+    }
+});
 // ---------------------------------------------------------------------------
 // Output truncation
 // ---------------------------------------------------------------------------
@@ -30,13 +84,14 @@ function truncateResponse(text, maxChars = MAX_RESPONSE_CHARS) {
 // ---------------------------------------------------------------------------
 function queryDaemon(request, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
+        const port = getDaemonPort();
         const client = new net.Socket();
         let data = Buffer.alloc(0);
         const timer = setTimeout(() => {
             client.destroy();
             reject(new Error("Daemon query timed out"));
         }, timeoutMs);
-        client.connect(DAEMON_PORT, DAEMON_HOST, () => {
+        client.connect(port, DAEMON_HOST, () => {
             client.write(JSON.stringify(request));
         });
         client.on("data", (chunk) => {
@@ -57,14 +112,34 @@ function queryDaemon(request, timeoutMs = 10000) {
         });
     });
 }
+function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+}
+async function queryDaemonWithRetry(request, timeoutMs = 10000, retries = 3) {
+    for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+            return await queryDaemon(request, timeoutMs);
+        }
+        catch (err) {
+            const isConnRefused = err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED");
+            if (isConnRefused && attempt < retries - 1) {
+                spawnDaemon();
+                await sleep(2000);
+                continue;
+            }
+            throw err;
+        }
+    }
+}
 function checkHealth() {
     return new Promise((resolve) => {
+        const port = getDaemonPort();
         const client = new net.Socket();
         const timer = setTimeout(() => {
             client.destroy();
             resolve(false);
         }, 2000);
-        client.connect(DAEMON_PORT, DAEMON_HOST, () => {
+        client.connect(port, DAEMON_HOST, () => {
             // Daemon sends ALIVE on bare connection
             client.on("data", (chunk) => {
                 clearTimeout(timer);
@@ -97,20 +172,8 @@ const server = new McpServer({
 });
 // --- get_status ---
 server.tool("get_status", "Check if the RLM daemon is running and responsive", {}, async () => {
-    const alive = await checkHealth();
-    if (!alive) {
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: "RLM daemon is OFFLINE. Start it with:\n  python daemon/rlm_daemon.py --root <project_path>",
-                },
-            ],
-            isError: true,
-        };
-    }
     try {
-        const status = await queryDaemon({ action: "status" });
+        const status = await queryDaemonWithRetry({ action: "status" });
         return {
             content: [
                 {
@@ -123,8 +186,12 @@ server.tool("get_status", "Check if the RLM daemon is running and responsive", {
     catch {
         return {
             content: [
-                { type: "text", text: "RLM daemon is ALIVE (status query failed)" },
+                {
+                    type: "text",
+                    text: "RLM daemon is OFFLINE. Start it with:\n  python daemon/rlm_daemon.py --root <project_path>",
+                },
             ],
+            isError: true,
         };
     }
 });
@@ -143,7 +210,7 @@ server.tool("rlm_tree", "Get directory listing with file types and sizes (no fil
         .describe("Maximum directory depth to traverse"),
 }, async ({ path: dirPath, max_depth }) => {
     try {
-        const result = await queryDaemon({
+        const result = await queryDaemonWithRetry({
             action: "tree",
             path: dirPath,
             max_depth,
@@ -182,7 +249,7 @@ server.tool("rlm_map", "Get structural skeleton of a file (signatures + docstrin
         .describe("File path relative to project root"),
 }, async ({ path: filePath }) => {
     try {
-        const result = await queryDaemon({ action: "squeeze", path: filePath });
+        const result = await queryDaemonWithRetry({ action: "squeeze", path: filePath });
         if (result.error) {
             return {
                 content: [{ type: "text", text: `Error: ${result.error}` }],
@@ -216,7 +283,7 @@ server.tool("rlm_drill", "Surgically read only a specific symbol's implementatio
 }, async ({ path: filePath, symbol }) => {
     try {
         // Ask daemon for line range
-        const findResult = await queryDaemon({
+        const findResult = await queryDaemonWithRetry({
             action: "find",
             path: filePath,
             symbol,
@@ -231,7 +298,7 @@ server.tool("rlm_drill", "Surgically read only a specific symbol's implementatio
         }
         // Read those exact lines from the file
         // Resolve relative to daemon root via status
-        const status = await queryDaemon({ action: "status" });
+        const status = await queryDaemonWithRetry({ action: "status" });
         const absPath = path.resolve(status.root, filePath);
         const code = readLines(absPath, findResult.start_line, findResult.end_line);
         return {
@@ -266,7 +333,7 @@ server.tool("rlm_search", "Search for a symbol name across all files in a direct
         .describe("Directory path relative to project root to search in (empty = root)"),
 }, async ({ query, path: dirPath }) => {
     try {
-        const result = await queryDaemon({
+        const result = await queryDaemonWithRetry({
             action: "search",
             query,
             path: dirPath,
@@ -317,7 +384,7 @@ server.tool("rlm_search", "Search for a symbol name across all files in a direct
 // --- rlm_repl_init ---
 server.tool("rlm_repl_init", "Initialize the stateful Python REPL. Clears any existing state and creates a fresh environment.", {}, async () => {
     try {
-        const result = await queryDaemon({ action: "repl_init" });
+        const result = await queryDaemonWithRetry({ action: "repl_init" });
         if (result.error) {
             return {
                 content: [{ type: "text", text: `Error: ${result.error}` }],
@@ -352,7 +419,7 @@ server.tool("rlm_repl_exec", `Execute Python code in the stateful REPL. Variable
     code: z.string().describe("Python code to execute in the REPL"),
 }, async ({ code }) => {
     try {
-        const result = await queryDaemon({ action: "repl_exec", code });
+        const result = await queryDaemonWithRetry({ action: "repl_exec", code });
         if (result.error && !result.output) {
             return {
                 content: [{ type: "text", text: `Error:\n${result.error}` }],
@@ -386,7 +453,7 @@ server.tool("rlm_repl_exec", `Execute Python code in the stateful REPL. Variable
 // --- rlm_repl_status ---
 server.tool("rlm_repl_status", "Check the current state of the REPL — variables, buffer counts, execution count.", {}, async () => {
     try {
-        const result = await queryDaemon({ action: "repl_status" });
+        const result = await queryDaemonWithRetry({ action: "repl_status" });
         if (result.error) {
             return {
                 content: [{ type: "text", text: `Error: ${result.error}` }],
@@ -417,7 +484,7 @@ server.tool("rlm_repl_status", "Check the current state of the REPL — variable
 // --- rlm_repl_reset ---
 server.tool("rlm_repl_reset", "Clear all REPL state — variables, buffers, execution history.", {}, async () => {
     try {
-        const result = await queryDaemon({ action: "repl_reset" });
+        const result = await queryDaemonWithRetry({ action: "repl_reset" });
         if (result.error) {
             return {
                 content: [{ type: "text", text: `Error: ${result.error}` }],
@@ -440,7 +507,7 @@ server.tool("rlm_repl_reset", "Clear all REPL state — variables, buffers, exec
 // --- rlm_repl_export ---
 server.tool("rlm_repl_export", "Export all accumulated buffers from the REPL. Use after add_buffer() calls to retrieve collected findings.", {}, async () => {
     try {
-        const result = await queryDaemon({ action: "repl_export_buffers" });
+        const result = await queryDaemonWithRetry({ action: "repl_export_buffers" });
         if (result.error) {
             return {
                 content: [{ type: "text", text: `Error: ${result.error}` }],

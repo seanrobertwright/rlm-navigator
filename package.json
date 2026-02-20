@@ -1,0 +1,17 @@
+{
+  "name": "rlm-navigator",
+  "version": "0.1.0",
+  "description": "Token-efficient codebase navigation for AI-assisted coding",
+  "bin": {
+    "rlm-navigator": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "daemon/*.py",
+    "daemon/requirements.txt",
+    "server/src/",
+    "server/package.json",
+    "server/tsconfig.json",
+    "templates/"
+  ]
+}
