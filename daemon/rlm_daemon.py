@@ -33,6 +33,51 @@ IGNORED_DIRS = {
 IGNORED_PATTERNS = {"*.pyc", "*.pyo", "*.class", "*.o", "*.so", "*.dll"}
 
 
+class SessionStats:
+    """Tracks token savings across a daemon session."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.session_start = time.time()
+        self.tool_calls = 0
+        self.bytes_served = 0
+        self.bytes_avoided = 0
+        self.per_action: dict[str, dict] = {}
+
+    def record(self, action: str, served_bytes: int, avoided_bytes: int = 0):
+        with self._lock:
+            self.tool_calls += 1
+            self.bytes_served += served_bytes
+            self.bytes_avoided += avoided_bytes
+            if action not in self.per_action:
+                self.per_action[action] = {"calls": 0, "bytes_served": 0, "bytes_avoided": 0}
+            self.per_action[action]["calls"] += 1
+            self.per_action[action]["bytes_served"] += served_bytes
+            self.per_action[action]["bytes_avoided"] += avoided_bytes
+
+    def to_dict(self) -> dict:
+        with self._lock:
+            total_bytes = self.bytes_served + self.bytes_avoided
+            reduction_pct = round(self.bytes_avoided / total_bytes * 100) if total_bytes > 0 else 0
+            breakdown = {}
+            for action, data in self.per_action.items():
+                entry: dict = {
+                    "calls": data["calls"],
+                    "tokens_served": data["bytes_served"] // 4,
+                }
+                if data["bytes_avoided"] > 0:
+                    entry["tokens_avoided"] = data["bytes_avoided"] // 4
+                breakdown[action] = entry
+            return {
+                "tool_calls": self.tool_calls,
+                "tokens_served": self.bytes_served // 4,
+                "tokens_avoided": self.bytes_avoided // 4,
+                "reduction_pct": reduction_pct,
+                "duration_s": round(time.time() - self.session_start),
+                "breakdown": breakdown,
+            }
+
+
 class SkeletonCache:
     """Thread-safe in-memory cache of squeezed file skeletons."""
 
@@ -208,7 +253,7 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
     return results
 
 
-def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None) -> bytes:
+def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None) -> bytes:
     """Process a JSON request and return a JSON response."""
     try:
         req = json.loads(data.decode("utf-8"))
@@ -227,7 +272,14 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
         skeleton = cache.get(abs_path)
         if skeleton is None:
             return json.dumps({"error": f"File not found: {path}"}).encode("utf-8")
-        return json.dumps({"skeleton": skeleton}).encode("utf-8")
+        response = json.dumps({"skeleton": skeleton}).encode("utf-8")
+        if stats:
+            try:
+                full_size = os.path.getsize(abs_path)
+            except OSError:
+                full_size = len(response)
+            stats.record("squeeze", len(response), max(0, full_size - len(skeleton.encode("utf-8"))))
+        return response
 
     elif action == "find":
         path = req.get("path", "")
@@ -237,7 +289,20 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
             return json.dumps({"error": "Path outside project root"}).encode("utf-8")
         result = find_symbol(abs_path, symbol)
         if result:
-            return json.dumps({"start_line": result[0], "end_line": result[1]}).encode("utf-8")
+            response = json.dumps({"start_line": result[0], "end_line": result[1]}).encode("utf-8")
+            if stats:
+                try:
+                    full_size = os.path.getsize(abs_path)
+                    # Estimate drilled lines size from line range
+                    with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                    drilled = "".join(lines[result[0] - 1:result[1]])
+                    drilled_size = len(drilled.encode("utf-8"))
+                except (OSError, IndexError):
+                    full_size = len(response)
+                    drilled_size = len(response)
+                stats.record("find", len(response) + drilled_size, max(0, full_size - drilled_size))
+            return response
         return json.dumps({"error": f"Symbol '{symbol}' not found in {path}"}).encode("utf-8")
 
     elif action == "tree":
@@ -247,7 +312,10 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
         if not abs_path.startswith(str(root_path)):
             return json.dumps({"error": "Path outside project root"}).encode("utf-8")
         tree = build_tree(abs_path, root, max_depth)
-        return json.dumps({"tree": tree}).encode("utf-8")
+        response = json.dumps({"tree": tree}).encode("utf-8")
+        if stats:
+            stats.record("tree", len(response))
+        return response
 
     elif action == "search":
         query = req.get("query", "")
@@ -256,15 +324,28 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
         if not abs_path.startswith(str(root_path)):
             return json.dumps({"error": "Path outside project root"}).encode("utf-8")
         results = search_symbols(cache, root, query, abs_path)
-        return json.dumps({"results": results}).encode("utf-8")
+        response = json.dumps({"results": results}).encode("utf-8")
+        if stats:
+            # Sum full file sizes of matched files
+            sum_file_sizes = 0
+            for r in results:
+                try:
+                    sum_file_sizes += os.path.getsize(str(root_path / r["path"]))
+                except OSError:
+                    pass
+            stats.record("search", len(response), max(0, sum_file_sizes - len(response)))
+        return response
 
     elif action == "status":
-        return json.dumps({
+        resp = {
             "status": "alive",
             "root": root,
             "cache_size": cache.size,
             "languages": supported_languages(),
-        }).encode("utf-8")
+        }
+        if stats:
+            resp["session"] = stats.to_dict()
+        return json.dumps(resp).encode("utf-8")
 
     elif action == "repl_init":
         if repl is None:
@@ -301,7 +382,7 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
         return json.dumps({"error": f"Unknown action: {action}"}).encode("utf-8")
 
 
-def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None):
+def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None):
     """Handle a single TCP client connection."""
     try:
         # Read data with a simple length-prefix or newline protocol
@@ -324,7 +405,7 @@ def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RL
             conn.sendall(b"ALIVE")
             return
 
-        response = handle_request(data, cache, root, repl)
+        response = handle_request(data, cache, root, repl, stats)
         conn.sendall(response)
     except socket.timeout:
         # Bare connection for health check
@@ -344,6 +425,7 @@ def run_server(root: str, port: int):
     cache = SkeletonCache()
     root_path = str(Path(root).resolve())
     repl = RLMRepl(root_path)
+    stats = SessionStats()
 
     # Start file watcher
     handler = RLMEventHandler(cache, root_path, repl=repl)
@@ -383,7 +465,7 @@ def run_server(root: str, port: int):
             conn, addr = server.accept()
             thread = threading.Thread(
                 target=handle_client,
-                args=(conn, cache, root_path, repl),
+                args=(conn, cache, root_path, repl, stats),
                 daemon=True,
             )
             thread.start()

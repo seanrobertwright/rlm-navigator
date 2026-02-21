@@ -228,11 +228,40 @@ server.tool(
   async () => {
     try {
       const status = await queryDaemonWithRetry({ action: "status" });
+      let text = `RLM daemon is ALIVE\nRoot: ${status.root}\nCached files: ${status.cache_size}\nLanguages: ${(status.languages || []).join(", ")}`;
+
+      if (status.session) {
+        const s = status.session;
+        const mins = Math.floor(s.duration_s / 60);
+        const secs = s.duration_s % 60;
+        const duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        text += `\n\nSession Stats:`;
+        text += `\n  Tool calls: ${s.tool_calls} | Duration: ${duration}`;
+        text += `\n  Tokens served: ${s.tokens_served.toLocaleString()} | Tokens avoided: ${s.tokens_avoided.toLocaleString()} (${s.reduction_pct}% reduction)`;
+        if (s.breakdown && Object.keys(s.breakdown).length > 0) {
+          text += `\n  Breakdown:`;
+          const actionMap: Record<string, string> = {
+            squeeze: "rlm_map",
+            find: "rlm_drill",
+            search: "rlm_search",
+            tree: "rlm_tree",
+          };
+          for (const [action, data] of Object.entries(s.breakdown) as [string, any][]) {
+            const name = (actionMap[action] || action).padEnd(12);
+            let line = `${data.calls} calls — ${data.tokens_served.toLocaleString()} served`;
+            if (data.tokens_avoided) {
+              line += `, ${data.tokens_avoided.toLocaleString()} avoided`;
+            }
+            text += `\n    ${name}${line}`;
+          }
+        }
+      }
+
       return {
         content: [
           {
             type: "text" as const,
-            text: `RLM daemon is ALIVE\nRoot: ${status.root}\nCached files: ${status.cache_size}\nLanguages: ${(status.languages || []).join(", ")}`,
+            text,
           },
         ],
       };
