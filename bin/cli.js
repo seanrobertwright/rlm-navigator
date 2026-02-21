@@ -285,6 +285,82 @@ function status() {
 }
 
 // ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
+
+function update() {
+  console.log("=== RLM Navigator — Update ===\n");
+
+  if (!fs.existsSync(RLM_DIR)) {
+    console.log("Not installed (.rlm/ not found). Run 'npx rlm-navigator install' first.");
+    process.exit(1);
+  }
+
+  const python = findPython();
+  if (!python) {
+    console.error("Error: Python not found. Install Python 3.8+ and ensure 'python' or 'python3' is on PATH.");
+    process.exit(1);
+  }
+
+  // 1. Re-copy daemon/ and server/ source files
+  console.log("[1/4] Updating daemon and server source files ...");
+  copyDirSync(path.join(PKG_ROOT, "daemon"), path.join(RLM_DIR, "daemon"));
+  copyDirSync(path.join(PKG_ROOT, "server"), path.join(RLM_DIR, "server"));
+  console.log("  Done.\n");
+
+  // 2. Re-copy .claude/skills/ and .claude/agents/
+  console.log("[2/4] Updating skill and agent files ...");
+  const srcSkills = path.join(PKG_ROOT, ".claude", "skills");
+  const srcAgents = path.join(PKG_ROOT, ".claude", "agents");
+  const destClaude = path.join(CWD, ".claude");
+  if (fs.existsSync(srcSkills)) {
+    copyDirSync(srcSkills, path.join(destClaude, "skills"));
+  }
+  if (fs.existsSync(srcAgents)) {
+    copyDirSync(srcAgents, path.join(destClaude, "agents"));
+  }
+  console.log("  Done.\n");
+
+  // 3. Reinstall deps and rebuild
+  console.log("[3/4] Reinstalling dependencies and rebuilding ...");
+  const reqFile = path.join(RLM_DIR, "daemon", "requirements.txt");
+  run(`${python} -m pip install -r "${reqFile}"`);
+  run("npm install", { cwd: path.join(RLM_DIR, "server") });
+  if (!run("npm run build", { cwd: path.join(RLM_DIR, "server") })) {
+    console.error("\nServer build failed.");
+    process.exit(1);
+  }
+  console.log("");
+
+  // 4. Update CLAUDE.md snippet (replace existing block or prepend)
+  console.log("[4/4] Updating CLAUDE.md ...");
+  const snippetPath = path.join(PKG_ROOT, "templates", "CLAUDE_SNIPPET.md");
+  const snippet = fs.readFileSync(snippetPath, "utf-8");
+  const claudeMdPath = path.join(CWD, "CLAUDE.md");
+
+  if (!fs.existsSync(claudeMdPath)) {
+    fs.writeFileSync(claudeMdPath, snippet);
+    console.log("  Created CLAUDE.md with RLM Navigator instructions.\n");
+  } else {
+    const existing = fs.readFileSync(claudeMdPath, "utf-8");
+    if (existing.includes("<!-- rlm-navigator:start -->")) {
+      const updated = existing.replace(
+        /<!-- rlm-navigator:start -->[\s\S]*?<!-- rlm-navigator:end -->\n?/,
+        snippet
+      );
+      fs.writeFileSync(claudeMdPath, updated);
+      console.log("  Replaced existing RLM Navigator block in CLAUDE.md.\n");
+    } else {
+      fs.writeFileSync(claudeMdPath, snippet + "\n" + existing);
+      console.log("  Prepended RLM Navigator block to CLAUDE.md.\n");
+    }
+  }
+
+  console.log("=== Update complete ===");
+  console.log("\nRestart Claude Code to pick up changes.");
+}
+
+// ---------------------------------------------------------------------------
 // Help
 // ---------------------------------------------------------------------------
 
@@ -297,6 +373,7 @@ Usage:
 
 Commands:
   install     Install RLM Navigator into the current project (.rlm/)
+  update      Update an existing installation to the latest version
   uninstall   Remove RLM Navigator from the current project
   status      Check daemon health and installation status
   help        Show this help message
@@ -323,6 +400,9 @@ switch (command) {
       console.error("Install failed:", err.message);
       process.exit(1);
     });
+    break;
+  case "update":
+    update();
     break;
   case "uninstall":
     uninstall();

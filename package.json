@@ -3,7 +3,7 @@
   "version": "0.1.3",
   "description": "Token-efficient codebase navigation for AI-assisted coding",
   "bin": {
-    "rlm-navigator": "./bin/cli.js"
+    "rlm-navigator": "bin/cli.js"
   },
   "files": [
     "bin/",

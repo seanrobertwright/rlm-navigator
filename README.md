@@ -70,8 +70,9 @@ This copies the daemon and server into a local `.rlm/` directory, installs depen
 ### Other Commands
 
 ```bash
-npx rlm-navigator status      # Check daemon health
-npx rlm-navigator uninstall   # Remove from project
+npx rlm-navigator@latest update    # Update to latest version
+npx rlm-navigator status            # Check daemon health
+npx rlm-navigator uninstall         # Remove from project
 ```
 
 ### Manual / Development Setup
