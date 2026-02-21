@@ -12,6 +12,7 @@ import { z } from "zod";
 import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 const DAEMON_HOST = "127.0.0.1";
 const MAX_RESPONSE_CHARS = parseInt(process.env.RLM_MAX_RESPONSE || "8000", 10);
@@ -21,12 +22,8 @@ function resolveProjectRoot() {
         return process.env.RLM_PROJECT_ROOT;
     // 2. Detect from script location: if running from <project>/.rlm/server/build/index.js,
     //    walk up to find the .rlm parent
-    const scriptDir = path.dirname(new URL(import.meta.url).pathname);
-    // Normalize for Windows (strip leading / from /C:/...)
-    const normalized = process.platform === "win32" && scriptDir.match(/^\/[A-Za-z]:/)
-        ? scriptDir.slice(1)
-        : scriptDir;
-    const parts = normalized.split(path.sep);
+    const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+    const parts = scriptDir.split(path.sep);
     const rlmIdx = parts.lastIndexOf(".rlm");
     if (rlmIdx > 0) {
         return parts.slice(0, rlmIdx).join(path.sep);

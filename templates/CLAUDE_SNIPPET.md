@@ -1,21 +1,29 @@
 <!-- rlm-navigator:start -->
 
-## RLM Navigator — Token Conservation Rules
+## REQUIRED: Use RLM Navigator for All Codebase Navigation
 
-1. **Never read full files** — use `rlm_map` for signatures, `rlm_drill` for specific symbols
-2. **Never use ls/find/Glob** for exploration — use `rlm_tree`
-3. **Map before drill** — always see the skeleton first
-4. **Surgical edits only** — use Edit tool with minimal context
-5. **Minimalist responses** — no verbose explanations unless asked
-6. **No redundant reads** — if it's in context, don't read it again
+This project uses the `/rlm-navigator` skill. You MUST follow the RLM Navigator workflow for ALL codebase exploration, file reading, and code search. This is NOT optional.
+
+**Mandatory workflow: `rlm_tree` → `rlm_map` → `rlm_drill` → Edit**
+
+### What you MUST do:
+- Use `rlm_tree` instead of `ls`, `find`, or `Glob` for directory exploration
+- Use `rlm_map` instead of `Read` or `cat` to understand file contents
+- Use `rlm_drill` to read only the specific symbol you need
+- Use `rlm_search` to find symbols across files
+
+### What you MUST NOT do:
+- Do NOT read full files with the `Read` tool unless the file is under 50 lines or is a config file
+- Do NOT use `Glob` or `find` to explore the project structure
+- Do NOT use `grep` or `Grep` for code search — use `rlm_search` or the REPL's `grep()` helper
 
 ### Navigation Tools
 
 | Tool | Purpose |
 |------|---------|
 | `get_status` | Check daemon health |
-| `rlm_tree` | See directory structure (replaces ls/find) |
-| `rlm_map` | See file signatures only (replaces cat/read) |
+| `rlm_tree` | See directory structure (replaces ls/find/Glob) |
+| `rlm_map` | See file signatures only (replaces Read/cat) |
 | `rlm_drill` | Read specific symbol implementation |
 | `rlm_search` | Find symbols across files |
 

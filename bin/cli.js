@@ -132,8 +132,8 @@ async function install() {
     if (existing.includes("<!-- rlm-navigator:start -->")) {
       console.log("  CLAUDE.md already contains RLM Navigator block — skipped.\n");
     } else {
-      fs.writeFileSync(claudeMdPath, existing + "\n" + snippet);
-      console.log("  Appended RLM Navigator block to CLAUDE.md.\n");
+      fs.writeFileSync(claudeMdPath, snippet + "\n" + existing);
+      console.log("  Prepended RLM Navigator block to CLAUDE.md.\n");
     }
   }
 
