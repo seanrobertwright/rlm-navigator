@@ -54,6 +54,7 @@ class RLMRepl:
         self.state_path = os.path.join(self.state_dir, "state.pkl")
         self._lock = threading.Lock()
         self._namespace: dict = {}
+        os.makedirs(self.state_dir, exist_ok=True)
         self._load_state()
 
     def _load_state(self):
