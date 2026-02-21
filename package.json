@@ -1,6 +1,6 @@
 {
   "name": "rlm-navigator",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Token-efficient codebase navigation for AI-assisted coding",
   "bin": {
     "rlm-navigator": "bin/cli.js"
