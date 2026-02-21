@@ -161,14 +161,14 @@ async function install() {
   const claudeAvailable = spawnSync("claude", ["--version"], { stdio: "pipe" }).status === 0;
 
   if (claudeAvailable) {
-    const registerCmd = `claude mcp add rlm-navigator --env RLM_PROJECT_ROOT="${CWD}" -- node "${mcpServerPath}"`;
+    const registerCmd = `claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`;
     if (!run(registerCmd)) {
       console.log("  Manual registration command:");
-      console.log(`  claude mcp add rlm-navigator --env RLM_PROJECT_ROOT="${CWD}" -- node "${mcpServerPath}"`);
+      console.log(`  claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`);
     }
   } else {
     console.log("  Claude CLI not found. Register manually:");
-    console.log(`  claude mcp add rlm-navigator --env RLM_PROJECT_ROOT="${CWD}" -- node "${mcpServerPath}"`);
+    console.log(`  claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`);
   }
 
   console.log("\n=== Installation complete ===");
@@ -187,7 +187,9 @@ function uninstall() {
   const claudeAvailable = spawnSync("claude", ["--version"], { stdio: "pipe" }).status === 0;
   if (claudeAvailable) {
     console.log("Removing MCP server registration ...");
-    run("claude mcp remove rlm-navigator");
+    run("claude mcp remove rlm-navigator --scope project");
+    // Also remove user-scope registration from older versions
+    run("claude mcp remove rlm-navigator --scope user");
   }
 
   // 2. Remove .rlm/
@@ -354,6 +356,18 @@ function update() {
       fs.writeFileSync(claudeMdPath, snippet + "\n" + existing);
       console.log("  Prepended RLM Navigator block to CLAUDE.md.\n");
     }
+  }
+
+  // 5. Migrate MCP registration to project scope
+  const claudeAvailable = spawnSync("claude", ["--version"], { stdio: "pipe" }).status === 0;
+  if (claudeAvailable) {
+    console.log("[5/5] Ensuring project-scoped MCP registration ...");
+    const mcpServerPath = path.join(RLM_DIR, "server", "build", "index.js");
+    // Remove old user-scope registration if present
+    run("claude mcp remove rlm-navigator --scope user");
+    // Register at project scope
+    run(`claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`);
+    console.log("");
   }
 
   console.log("=== Update complete ===");
