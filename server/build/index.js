@@ -139,7 +139,43 @@ function queryDaemon(request, timeoutMs = 10000) {
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
+let daemonRootValidated = false;
+async function validateDaemonRoot() {
+    if (daemonRootValidated)
+        return;
+    try {
+        const status = await queryDaemon({ action: "status" });
+        if (status.root) {
+            const daemonRoot = path.resolve(status.root);
+            const expectedRoot = path.resolve(PROJECT_ROOT);
+            if (daemonRoot !== expectedRoot) {
+                // Stale port file pointing to wrong project's daemon — delete and respawn
+                const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
+                try {
+                    fs.unlinkSync(portFile);
+                }
+                catch { }
+                spawnDaemon();
+                await sleep(2000);
+                // Verify the new daemon is correct
+                const newStatus = await queryDaemon({ action: "status" });
+                if (newStatus.root && path.resolve(newStatus.root) !== expectedRoot) {
+                    throw new Error(`Daemon root mismatch: expected ${expectedRoot}, got ${path.resolve(newStatus.root)}`);
+                }
+            }
+        }
+        daemonRootValidated = true;
+    }
+    catch (err) {
+        if (err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED")) {
+            // No daemon running — will be spawned on next query
+            return;
+        }
+        throw err;
+    }
+}
 async function queryDaemonWithRetry(request, timeoutMs = 10000, retries = 3) {
+    await validateDaemonRoot();
     for (let attempt = 0; attempt < retries; attempt++) {
         try {
             return await queryDaemon(request, timeoutMs);
