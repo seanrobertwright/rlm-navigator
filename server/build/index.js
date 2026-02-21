@@ -49,7 +49,11 @@ function getDaemonPort() {
     catch {
         // File doesn't exist or unreadable — fall through
     }
-    // 3. Default
+    // 3. If .rlm/ exists, don't fall back to 9177 (would hit wrong daemon)
+    const rlmDir = path.join(PROJECT_ROOT, ".rlm");
+    if (fs.existsSync(rlmDir))
+        return null;
+    // 4. Legacy mode (no .rlm/) — use default port
     return 9177;
 }
 function spawnDaemon() {
@@ -101,6 +105,10 @@ function truncateResponse(text, maxChars = MAX_RESPONSE_CHARS) {
 function queryDaemon(request, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
         const port = getDaemonPort();
+        if (port === null) {
+            reject(Object.assign(new Error("No daemon running for this project"), { code: "ECONNREFUSED" }));
+            return;
+        }
         const client = new net.Socket();
         let data = Buffer.alloc(0);
         const timer = setTimeout(() => {
@@ -150,6 +158,10 @@ async function queryDaemonWithRetry(request, timeoutMs = 10000, retries = 3) {
 function checkHealth() {
     return new Promise((resolve) => {
         const port = getDaemonPort();
+        if (port === null) {
+            resolve(false);
+            return;
+        }
         const client = new net.Socket();
         const timer = setTimeout(() => {
             client.destroy();
