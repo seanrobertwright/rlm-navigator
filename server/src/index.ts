@@ -40,6 +40,15 @@ const PROJECT_ROOT = resolveProjectRoot();
 
 let daemonChild: ChildProcess | null = null;
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0); // Signal 0 = existence check, doesn't kill
+    return true;
+  } catch {
+    return false; // ESRCH = no such process
+  }
+}
+
 function getDaemonPort(): number | null {
   // 1. Env var override
   if (process.env.RLM_DAEMON_PORT) {
@@ -48,9 +57,29 @@ function getDaemonPort(): number | null {
   // 2. Read .rlm/port file
   try {
     const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
-    const content = fs.readFileSync(portFile, "utf-8").trim();
-    const port = parseInt(content, 10);
-    if (!isNaN(port)) return port;
+    const raw = fs.readFileSync(portFile, "utf-8").trim();
+
+    // Try JSON format first (new), fall back to plain number (legacy)
+    let port: number;
+    let pid: number | null = null;
+    try {
+      const parsed = JSON.parse(raw);
+      port = parsed.port;
+      pid = parsed.pid || null;
+    } catch {
+      port = parseInt(raw, 10);
+    }
+
+    if (isNaN(port)) return null;
+
+    // If we have a PID, check if it's still alive
+    if (pid !== null && !isPidAlive(pid)) {
+      // Stale port file — daemon is dead
+      try { fs.unlinkSync(portFile); } catch {}
+      return null;
+    }
+
+    return port;
   } catch {
     // File doesn't exist or unreadable — fall through
   }
@@ -70,7 +99,7 @@ function spawnDaemon(): void {
   // Try python, then python3
   for (const cmd of ["python", "python3"]) {
     try {
-      const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT], {
+      const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT, "--idle-timeout", "300"], {
         detached: true,
         stdio: "ignore",
       });
@@ -81,6 +110,20 @@ function spawnDaemon(): void {
       continue;
     }
   }
+}
+
+async function waitForDaemon(maxWaitMs = 5000): Promise<boolean> {
+  const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    await sleep(300);
+    if (fs.existsSync(portFile)) {
+      // Port file appeared — give daemon a moment to start accepting
+      await sleep(200);
+      return true;
+    }
+  }
+  return false;
 }
 
 // Kill daemon child on exit if we spawned it
@@ -151,10 +194,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-let daemonRootValidated = false;
+let daemonRootValidatedAt = 0;
+const VALIDATION_TTL_MS = 30_000; // Re-validate every 30s
 
 async function validateDaemonRoot(): Promise<void> {
-  if (daemonRootValidated) return;
+  if (Date.now() - daemonRootValidatedAt < VALIDATION_TTL_MS) return;
   try {
     const status = await queryDaemon({ action: "status" });
     if (status.root) {
@@ -165,7 +209,7 @@ async function validateDaemonRoot(): Promise<void> {
         const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
         try { fs.unlinkSync(portFile); } catch {}
         spawnDaemon();
-        await sleep(2000);
+        await waitForDaemon();
         // Verify the new daemon is correct
         const newStatus = await queryDaemon({ action: "status" });
         if (newStatus.root && path.resolve(newStatus.root) !== expectedRoot) {
@@ -175,7 +219,7 @@ async function validateDaemonRoot(): Promise<void> {
         }
       }
     }
-    daemonRootValidated = true;
+    daemonRootValidatedAt = Date.now();
   } catch (err: any) {
     if (err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED")) {
       // No daemon running — will be spawned on next query
@@ -194,7 +238,7 @@ async function queryDaemonWithRetry(request: object, timeoutMs = 10000, retries 
       const isConnRefused = err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED");
       if (isConnRefused && attempt < retries - 1) {
         spawnDaemon();
-        await sleep(2000);
+        await waitForDaemon();
         continue;
       }
       throw err;

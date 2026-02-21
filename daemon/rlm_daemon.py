@@ -420,12 +420,34 @@ def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RL
         conn.close()
 
 
-def run_server(root: str, port: int):
+def run_server(root: str, port: int, idle_timeout: int = 300):
     """Start the TCP server and file watcher."""
     cache = SkeletonCache()
     root_path = str(Path(root).resolve())
     repl = RLMRepl(root_path)
     stats = SessionStats()
+
+    # Idle tracking for auto-shutdown
+    last_activity = time.time()
+    activity_lock = threading.Lock()
+    shutdown_event = threading.Event()
+
+    def update_activity():
+        nonlocal last_activity
+        with activity_lock:
+            last_activity = time.time()
+
+    def idle_watchdog():
+        while not shutdown_event.is_set():
+            shutdown_event.wait(60)
+            if shutdown_event.is_set():
+                break
+            with activity_lock:
+                idle_secs = time.time() - last_activity
+            if idle_secs > idle_timeout:
+                print(f"\nIdle timeout ({idle_timeout}s) reached — shutting down.")
+                shutdown_event.set()
+                break
 
     # Start file watcher
     handler = RLMEventHandler(cache, root_path, repl=repl)
@@ -450,19 +472,31 @@ def run_server(root: str, port: int):
         observer.join()
         sys.exit(1)
     server.listen(5)
+    server.settimeout(1.0)  # Allow accept() to be interrupted for shutdown
 
     # Write port file if .rlm/ directory exists (npx install mode)
     port_file = Path(root_path) / ".rlm" / "port"
     if port_file.parent.is_dir():
-        port_file.write_text(str(bound_port))
+        port_file.write_text(json.dumps({"port": bound_port, "pid": os.getpid()}))
+
+    # Start idle watchdog if timeout is enabled
+    if idle_timeout > 0:
+        watchdog_thread = threading.Thread(target=idle_watchdog, daemon=True)
+        watchdog_thread.start()
 
     print(f"RLM Daemon active — watching: {root_path}")
     print(f"TCP server listening on 127.0.0.1:{bound_port}")
     print(f"Languages available: {', '.join(supported_languages())}")
+    if idle_timeout > 0:
+        print(f"Idle timeout: {idle_timeout}s")
 
     try:
-        while True:
-            conn, addr = server.accept()
+        while not shutdown_event.is_set():
+            try:
+                conn, addr = server.accept()
+            except socket.timeout:
+                continue
+            update_activity()
             thread = threading.Thread(
                 target=handle_client,
                 args=(conn, cache, root_path, repl, stats),
@@ -486,6 +520,8 @@ def main():
     parser = argparse.ArgumentParser(description="RLM Navigator Daemon")
     parser.add_argument("--root", required=True, help="Project root directory to watch")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"TCP port (default: {DEFAULT_PORT})")
+    parser.add_argument("--idle-timeout", type=int, default=300,
+                        help="Seconds of inactivity before auto-shutdown (0 = disabled, default: 300)")
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
@@ -493,7 +529,7 @@ def main():
         print(f"Error: {args.root} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    run_server(str(root), args.port)
+    run_server(str(root), args.port, args.idle_timeout)
 
 
 if __name__ == "__main__":
