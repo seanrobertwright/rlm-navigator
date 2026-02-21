@@ -125,13 +125,159 @@ class SkeletonCache:
             return len(self._cache)
 
 
+class ChunkStore:
+    """Disk-based file chunking store. Writes chunks to .rlm/chunks/ mirroring source tree."""
+
+    def __init__(self, root: str, chunks_dir: Path, chunk_size: int = 200, overlap: int = 20):
+        self.root = Path(root).resolve()
+        self.chunks_dir = chunks_dir
+        self.chunk_size = chunk_size
+        self.overlap = overlap
+        self.chunks_dir.mkdir(parents=True, exist_ok=True)
+
+    def _is_text_file(self, abs_path: Path) -> bool:
+        """Check if file is text by trying to decode first 8KB as UTF-8."""
+        try:
+            with open(abs_path, "rb") as f:
+                sample = f.read(8192)
+            sample.decode("utf-8")
+            return True
+        except (OSError, UnicodeDecodeError):
+            return False
+
+    def _chunk_dir_for(self, abs_path: Path) -> Path:
+        """Get the chunk directory for a given source file."""
+        rel = abs_path.resolve().relative_to(self.root)
+        return self.chunks_dir / rel
+
+    def chunk_file(self, abs_path_str: str):
+        """Chunk a single file to disk. Skips if mtime unchanged."""
+        abs_path = Path(abs_path_str).resolve()
+        if not abs_path.is_file():
+            return
+        if not self._is_text_file(abs_path):
+            return
+
+        chunk_dir = self._chunk_dir_for(abs_path)
+        manifest_path = chunk_dir / "manifest.json"
+
+        # Check mtime — skip if unchanged
+        try:
+            mtime = abs_path.stat().st_mtime
+        except OSError:
+            return
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if manifest.get("mtime") == mtime:
+                    return
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Read file lines
+        try:
+            with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            return
+
+        total_lines = len(lines)
+        if total_lines == 0:
+            return
+
+        # Compute chunk boundaries (same logic as rlm_repl.py:chunk_indices)
+        boundaries = []
+        start = 1
+        while start <= total_lines:
+            end = min(start + self.chunk_size - 1, total_lines)
+            boundaries.append((start, end))
+            start = end + 1 - self.overlap
+            if end == total_lines:
+                break
+
+        # Write chunks to temp dir then rename for atomicity
+        import tempfile
+        tmp_dir = Path(tempfile.mkdtemp(dir=self.chunks_dir))
+        try:
+            rel_path = abs_path.resolve().relative_to(self.root)
+            for i, (s, e) in enumerate(boundaries):
+                chunk_path = tmp_dir / f"chunk_{i:03d}.txt"
+                header = f"# {str(rel_path).replace(os.sep, '/')} lines {s}-{e}\n"
+                with open(chunk_path, "w", encoding="utf-8") as f:
+                    f.write(header)
+                    for line in lines[s - 1:e]:
+                        f.write(line)
+
+            # Write manifest
+            manifest = {
+                "total_chunks": len(boundaries),
+                "chunk_size": self.chunk_size,
+                "overlap": self.overlap,
+                "total_lines": total_lines,
+                "mtime": mtime,
+            }
+            (tmp_dir / "manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+
+            # Atomic swap: remove old dir, rename tmp
+            import shutil
+            if chunk_dir.exists():
+                shutil.rmtree(chunk_dir)
+            chunk_dir.parent.mkdir(parents=True, exist_ok=True)
+            tmp_dir.rename(chunk_dir)
+        except Exception:
+            # Clean up temp on failure
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def remove_file(self, abs_path_str: str):
+        """Remove chunk directory for a deleted file."""
+        abs_path = Path(abs_path_str).resolve()
+        chunk_dir = self._chunk_dir_for(abs_path)
+        if chunk_dir.exists():
+            import shutil
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+
+    def get_manifest(self, abs_path_str: str) -> Optional[dict]:
+        """Read and return manifest for a file, or None."""
+        abs_path = Path(abs_path_str).resolve()
+        manifest_path = self._chunk_dir_for(abs_path) / "manifest.json"
+        if not manifest_path.exists():
+            return None
+        try:
+            return json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def read_chunk(self, abs_path_str: str, chunk_index: int) -> Optional[str]:
+        """Read a specific chunk file, or None."""
+        abs_path = Path(abs_path_str).resolve()
+        chunk_path = self._chunk_dir_for(abs_path) / f"chunk_{chunk_index:03d}.txt"
+        if not chunk_path.exists():
+            return None
+        try:
+            return chunk_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    def scan_all(self):
+        """Walk project tree and chunk all text files. Respects IGNORED_DIRS."""
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = [d for d in dirnames if d not in IGNORED_DIRS and not d.startswith(".")]
+            for fname in filenames:
+                fpath = os.path.join(dirpath, fname)
+                self.chunk_file(fpath)
+
+
 class RLMEventHandler(FileSystemEventHandler):
     """Watchdog handler that invalidates cache on file changes."""
 
-    def __init__(self, cache: SkeletonCache, root: str, repl: Optional[RLMRepl] = None):
+    def __init__(self, cache: SkeletonCache, root: str, repl: Optional[RLMRepl] = None, chunk_store: Optional[ChunkStore] = None):
         self.cache = cache
         self.root = root
         self.repl = repl
+        self.chunk_store = chunk_store
 
     def _should_ignore(self, path: str) -> bool:
         parts = Path(path).parts
@@ -141,31 +287,45 @@ class RLMEventHandler(FileSystemEventHandler):
         if self.repl:
             self.repl.invalidate_dependencies(file_path)
 
+    def _rechunk(self, file_path: str):
+        if self.chunk_store:
+            self.chunk_store.chunk_file(file_path)
+
+    def _unchunk(self, file_path: str):
+        if self.chunk_store:
+            self.chunk_store.remove_file(file_path)
+
     def on_modified(self, event: FileSystemEvent):
         if event.is_directory or self._should_ignore(event.src_path):
             return
         self.cache.invalidate(event.src_path)
         self._notify_repl(event.src_path)
+        self._rechunk(event.src_path)
 
     def on_created(self, event: FileSystemEvent):
         if event.is_directory or self._should_ignore(event.src_path):
             return
         # New file — will be lazily cached on next request
+        self._rechunk(event.src_path)
 
     def on_deleted(self, event: FileSystemEvent):
         if event.is_directory or self._should_ignore(event.src_path):
             return
         self.cache.invalidate(event.src_path)
         self._notify_repl(event.src_path)
+        self._unchunk(event.src_path)
 
     def on_moved(self, event):
         if self._should_ignore(event.src_path):
             return
         self.cache.invalidate(event.src_path)
         self._notify_repl(event.src_path)
+        self._unchunk(event.src_path)
         if hasattr(event, "dest_path"):
             self.cache.invalidate(event.dest_path)
             self._notify_repl(event.dest_path)
+            if not self._should_ignore(event.dest_path):
+                self._rechunk(event.dest_path)
 
 
 def build_tree(dir_path: str, root: str, max_depth: int = 4) -> list[dict]:
@@ -253,7 +413,7 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
     return results
 
 
-def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None) -> bytes:
+def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None) -> bytes:
     """Process a JSON request and return a JSON response."""
     try:
         req = json.loads(data.decode("utf-8"))
@@ -378,11 +538,63 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
         result = repl.export_buffers()
         return json.dumps(result).encode("utf-8")
 
+    elif action == "chunks_list":
+        if chunk_store is None:
+            return json.dumps({"error": "Chunk store not available"}).encode("utf-8")
+        path = req.get("path", "")
+        abs_path = str((root_path / path).resolve())
+        if not abs_path.startswith(str(root_path)):
+            return json.dumps({"error": "Path outside project root"}).encode("utf-8")
+        manifest = chunk_store.get_manifest(abs_path)
+        if manifest is None:
+            return json.dumps({"status": "pending"}).encode("utf-8")
+        response = json.dumps({"manifest": manifest, "status": "ready"}).encode("utf-8")
+        if stats:
+            stats.record("chunks_list", len(response))
+        return response
+
+    elif action == "chunks_read":
+        if chunk_store is None:
+            return json.dumps({"error": "Chunk store not available"}).encode("utf-8")
+        path = req.get("path", "")
+        chunk_idx = req.get("chunk", 0)
+        abs_path = str((root_path / path).resolve())
+        if not abs_path.startswith(str(root_path)):
+            return json.dumps({"error": "Path outside project root"}).encode("utf-8")
+        manifest = chunk_store.get_manifest(abs_path)
+        if manifest is None:
+            return json.dumps({"error": f"No chunks for: {path}"}).encode("utf-8")
+        content = chunk_store.read_chunk(abs_path, chunk_idx)
+        if content is None:
+            return json.dumps({"error": f"Chunk {chunk_idx} not found for: {path}"}).encode("utf-8")
+        # Compute line range from chunk index and manifest params
+        total_lines = manifest["total_lines"]
+        csize = manifest["chunk_size"]
+        coverlap = manifest["overlap"]
+        s = 1
+        for i in range(chunk_idx):
+            e = min(s + csize - 1, total_lines)
+            s = e + 1 - coverlap
+        end_line = min(s + csize - 1, total_lines)
+        response = json.dumps({
+            "content": content,
+            "chunk": chunk_idx,
+            "total_chunks": manifest["total_chunks"],
+            "lines": f"{s}-{end_line}",
+        }).encode("utf-8")
+        if stats:
+            try:
+                full_size = os.path.getsize(abs_path)
+            except OSError:
+                full_size = len(response)
+            stats.record("chunks_read", len(response), max(0, full_size - len(content.encode("utf-8"))))
+        return response
+
     else:
         return json.dumps({"error": f"Unknown action: {action}"}).encode("utf-8")
 
 
-def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None):
+def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None):
     """Handle a single TCP client connection."""
     try:
         # Read data with a simple length-prefix or newline protocol
@@ -405,7 +617,7 @@ def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RL
             conn.sendall(b"ALIVE")
             return
 
-        response = handle_request(data, cache, root, repl, stats)
+        response = handle_request(data, cache, root, repl, stats, chunk_store)
         conn.sendall(response)
     except socket.timeout:
         # Bare connection for health check
@@ -449,8 +661,17 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
                 shutdown_event.set()
                 break
 
+    # Create ChunkStore if .rlm/ exists (npx install mode)
+    chunk_store = None
+    rlm_dir = Path(root_path) / ".rlm"
+    if rlm_dir.is_dir():
+        chunk_store = ChunkStore(root_path, rlm_dir / "chunks")
+        # Run initial scan in background thread
+        scan_thread = threading.Thread(target=chunk_store.scan_all, daemon=True)
+        scan_thread.start()
+
     # Start file watcher
-    handler = RLMEventHandler(cache, root_path, repl=repl)
+    handler = RLMEventHandler(cache, root_path, repl=repl, chunk_store=chunk_store)
     observer = Observer()
     observer.schedule(handler, root_path, recursive=True)
     observer.start()
@@ -499,7 +720,7 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
             update_activity()
             thread = threading.Thread(
                 target=handle_client,
-                args=(conn, cache, root_path, repl, stats),
+                args=(conn, cache, root_path, repl, stats, chunk_store),
                 daemon=True,
             )
             thread.start()

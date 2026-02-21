@@ -576,6 +576,85 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Chunk Tools
+// ---------------------------------------------------------------------------
+
+// --- rlm_chunks ---
+server.tool(
+  "rlm_chunks",
+  "Get chunk metadata for a file. Returns total chunks, line count, and chunk parameters. Use before rlm_chunk to know how many chunks exist.",
+  {
+    path: z
+      .string()
+      .describe("File path relative to project root"),
+  },
+  async ({ path: filePath }) => {
+    try {
+      const result = await queryDaemonWithRetry({ action: "chunks_list", path: filePath });
+      if (result.error) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+      if (result.status === "pending") {
+        return {
+          content: [{ type: "text" as const, text: `Chunks for ${filePath} are still being generated. Try again shortly.` }],
+        };
+      }
+      const m = result.manifest;
+      return {
+        content: [{
+          type: "text" as const,
+          text: `${filePath}: ${m.total_chunks} chunks (${m.total_lines} lines, chunk_size=${m.chunk_size}, overlap=${m.overlap})`,
+        }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// --- rlm_chunk ---
+server.tool(
+  "rlm_chunk",
+  "Read a specific chunk of a file by index. Use rlm_chunks first to see how many chunks exist.",
+  {
+    path: z
+      .string()
+      .describe("File path relative to project root"),
+    chunk: z
+      .number()
+      .int()
+      .min(0)
+      .describe("Chunk index (0-based)"),
+  },
+  async ({ path: filePath, chunk: chunkIdx }) => {
+    try {
+      const result = await queryDaemonWithRetry({ action: "chunks_read", path: filePath, chunk: chunkIdx });
+      if (result.error) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+      const header = `# ${filePath} chunk ${result.chunk}/${result.total_chunks - 1} (lines ${result.lines})\n\n`;
+      return {
+        content: [{ type: "text" as const, text: truncateResponse(header + result.content) }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // REPL Tools
 // ---------------------------------------------------------------------------
 
