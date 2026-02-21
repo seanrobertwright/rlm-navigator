@@ -748,6 +748,19 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        # Persist session stats before cleanup
+        if stats and stats.tool_calls > 0:
+            log_file = Path(root_path) / ".rlm" / "sessions.jsonl"
+            if log_file.parent.is_dir():
+                try:
+                    entry = stats.to_dict()
+                    entry["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                    entry["root"] = root_path
+                    with open(log_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(entry) + "\n")
+                except OSError:
+                    pass
+
         if port_file.exists():
             try:
                 port_file.unlink()

@@ -47,4 +47,7 @@ This project uses the `/rlm-navigator` skill. You MUST follow the RLM Navigator 
 | `write_chunks` | `write_chunks(file_path, out_dir=None, size=200, overlap=20)` | Write chunks to disk |
 | `add_buffer` | `add_buffer(key, text)` | Accumulate findings in named buffers |
 
+### Session End
+- Before ending a session, call `get_status` to show the token savings summary
+
 <!-- rlm-navigator:end -->

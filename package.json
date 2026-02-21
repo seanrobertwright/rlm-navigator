@@ -14,7 +14,8 @@
     "server/tsconfig.json",
     "templates/",
     ".claude/skills/",
-    ".claude/agents/"
+    ".claude/agents/",
+    "hooks/"
   ],
   "dependencies": {
     "chalk": "^4.1.2",

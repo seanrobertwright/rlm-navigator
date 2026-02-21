@@ -123,3 +123,6 @@ When a sub-agent returns `answer_if_complete` (non-null), or when all chunks hav
 - Cross-file analysis spanning 5+ files
 - Architecture understanding tasks ("how does X work end-to-end?")
 - When a single `rlm_map` + `rlm_drill` cycle is insufficient
+
+## Session Summary
+Before ending a session or when the user says goodbye, call `get_status` to display token savings.

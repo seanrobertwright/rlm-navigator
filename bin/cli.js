@@ -113,6 +113,73 @@ function run(cmd, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Hook Helpers
+// ---------------------------------------------------------------------------
+
+function installHook() {
+  // 1. Copy hook file
+  const srcHook = path.join(PKG_ROOT, "hooks", "rlm-session-end.js");
+  const destHookDir = path.join(RLM_DIR, "hooks");
+  const destHook = path.join(destHookDir, "rlm-session-end.js");
+  fs.mkdirSync(destHookDir, { recursive: true });
+  fs.copyFileSync(srcHook, destHook);
+
+  // 2. Merge into .claude/settings.json
+  const settingsPath = path.join(CWD, ".claude", "settings.json");
+  let settings = {};
+  if (fs.existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    } catch {
+      settings = {};
+    }
+  }
+
+  if (!settings.hooks) settings.hooks = {};
+  if (!Array.isArray(settings.hooks.SessionEnd)) settings.hooks.SessionEnd = [];
+
+  const hookCmd = `node "${destHook.replace(/\\/g, "/")}"`;
+  const alreadyRegistered = settings.hooks.SessionEnd.some((entry) =>
+    (entry.hooks || []).some((h) => h.command && h.command.includes("rlm-session-end"))
+  );
+
+  if (!alreadyRegistered) {
+    settings.hooks.SessionEnd.push({
+      hooks: [{ type: "command", command: hookCmd }],
+    });
+  }
+
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+}
+
+function uninstallHook() {
+  const settingsPath = path.join(CWD, ".claude", "settings.json");
+  if (!fs.existsSync(settingsPath)) return;
+
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+  } catch {
+    return;
+  }
+
+  if (settings.hooks && Array.isArray(settings.hooks.SessionEnd)) {
+    settings.hooks.SessionEnd = settings.hooks.SessionEnd.filter((entry) =>
+      !(entry.hooks || []).some((h) => h.command && h.command.includes("rlm-session-end"))
+    );
+    if (settings.hooks.SessionEnd.length === 0) {
+      delete settings.hooks.SessionEnd;
+    }
+    if (Object.keys(settings.hooks).length === 0) {
+      delete settings.hooks;
+    }
+  }
+
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+}
+
+// ---------------------------------------------------------------------------
 // Install
 // ---------------------------------------------------------------------------
 
@@ -252,6 +319,15 @@ async function install() {
     console.log(chalk.dim(`  claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`));
   }
 
+  // 7. Register SessionEnd hook
+  spinner = step("Registering session-end hook...");
+  try {
+    installHook();
+    spinner.succeed("Session-end hook registered");
+  } catch (err) {
+    spinner.warn("Hook registration failed: " + err.message);
+  }
+
   successBox([
     chalk.bold.green("Installation complete!"),
     "",
@@ -364,6 +440,15 @@ function update() {
     }
   }
 
+  // 6. Re-register hook (idempotent)
+  spinner = step("Updating session-end hook...");
+  try {
+    installHook();
+    spinner.succeed("Session-end hook updated");
+  } catch (err) {
+    spinner.warn("Hook update failed: " + err.message);
+  }
+
   successBox([
     chalk.bold.green("Update complete!"),
     "",
@@ -387,8 +472,17 @@ function uninstall() {
     spinner.succeed("MCP registration removed");
   }
 
-  // 2. Remove .rlm/
+  // 2. Remove session-end hook
   let spinner;
+  spinner = step("Removing session-end hook...");
+  try {
+    uninstallHook();
+    spinner.succeed("Session-end hook removed");
+  } catch (err) {
+    spinner.warn("Hook removal failed: " + err.message);
+  }
+
+  // 3. Remove .rlm/
   if (fs.existsSync(RLM_DIR)) {
     spinner = step("Removing .rlm/ directory...");
     fs.rmSync(RLM_DIR, { recursive: true, force: true });
@@ -397,7 +491,7 @@ function uninstall() {
     console.log(chalk.dim("  .rlm/ not found — nothing to remove."));
   }
 
-  // 3. Remove .claude/skills/rlm-navigator/ and agent
+  // 4. Remove .claude/skills/rlm-navigator/ and agent
   spinner = step("Removing skill and agent files...");
   const skillDir = path.join(CWD, ".claude", "skills", "rlm-navigator");
   const agentFile = path.join(CWD, ".claude", "agents", "rlm-subcall.md");
@@ -416,7 +510,7 @@ function uninstall() {
     spinner.succeed("No skill/agent files to remove");
   }
 
-  // 4. Remove CLAUDE.md snippet
+  // 5. Remove CLAUDE.md snippet
   spinner = step("Cleaning CLAUDE.md...");
   const claudeMdPath = path.join(CWD, "CLAUDE.md");
   if (fs.existsSync(claudeMdPath)) {
