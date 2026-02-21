@@ -5,3 +5,4 @@ research/
 research/*
 .claude/rlm_state/
 .claude/rlm_state/*
+node_modules/
