@@ -415,6 +415,27 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
 
 def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None) -> bytes:
     """Process a JSON request and return a JSON response."""
+    response = _handle_request_inner(data, cache, root, repl, stats, chunk_store)
+    # Inject session stats into every successful JSON response
+    if stats:
+        try:
+            resp_dict = json.loads(response.decode("utf-8"))
+            if "error" not in resp_dict:
+                s = stats.to_dict()
+                resp_dict["_stats"] = {
+                    "tokens_served": s["tokens_served"],
+                    "tokens_avoided": s["tokens_avoided"],
+                    "reduction_pct": s["reduction_pct"],
+                    "tool_calls": s["tool_calls"],
+                }
+            return json.dumps(resp_dict).encode("utf-8")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+    return response
+
+
+def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None) -> bytes:
+    """Process a JSON request and return a JSON response."""
     try:
         req = json.loads(data.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):

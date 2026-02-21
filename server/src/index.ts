@@ -392,7 +392,7 @@ server.tool(
         content: [
           {
             type: "text" as const,
-            text: truncateResponse(formatTree(result.tree, "")),
+            text: truncateResponse(formatTree(result.tree, "")) + formatStats(result),
           },
         ],
       };
@@ -429,7 +429,7 @@ server.tool(
         };
       }
       return {
-        content: [{ type: "text" as const, text: truncateResponse(result.skeleton) }],
+        content: [{ type: "text" as const, text: truncateResponse(result.skeleton) + formatStats(result) }],
       };
     } catch (err: any) {
       return {
@@ -486,7 +486,7 @@ server.tool(
             type: "text" as const,
             text: truncateResponse(
               `# ${symbol} in ${filePath} (L${findResult.start_line}-${findResult.end_line})\n\n${code}`
-            ),
+            ) + formatStats(findResult),
           },
         ],
       };
@@ -557,7 +557,7 @@ server.tool(
             type: "text" as const,
             text: truncateResponse(
               `Found "${query}" in ${result.results.length} file(s):\n\n${output}`
-            ),
+            ) + formatStats(result),
           },
         ],
       };
@@ -606,7 +606,7 @@ server.tool(
       return {
         content: [{
           type: "text" as const,
-          text: `${filePath}: ${m.total_chunks} chunks (${m.total_lines} lines, chunk_size=${m.chunk_size}, overlap=${m.overlap})`,
+          text: `${filePath}: ${m.total_chunks} chunks (${m.total_lines} lines, chunk_size=${m.chunk_size}, overlap=${m.overlap})` + formatStats(result),
         }],
       };
     } catch (err: any) {
@@ -643,7 +643,7 @@ server.tool(
       }
       const header = `# ${filePath} chunk ${result.chunk}/${result.total_chunks - 1} (lines ${result.lines})\n\n`;
       return {
-        content: [{ type: "text" as const, text: truncateResponse(header + result.content) }],
+        content: [{ type: "text" as const, text: truncateResponse(header + result.content) + formatStats(result) }],
       };
     } catch (err: any) {
       return {
@@ -841,6 +841,12 @@ server.tool(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function formatStats(result: any): string {
+  const s = result?._stats;
+  if (!s) return "";
+  return `\n\n📊 Session: ${s.tokens_served.toLocaleString()} tokens served | ${s.tokens_avoided.toLocaleString()} avoided (${s.reduction_pct}% reduction) | ${s.tool_calls} calls`;
+}
 
 function formatStalenessWarning(staleness: any): string {
   const lines: string[] = ["\n⚠ STALE DATA WARNING:"];

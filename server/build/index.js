@@ -359,7 +359,7 @@ server.tool("rlm_tree", "Get directory listing with file types and sizes (no fil
             content: [
                 {
                     type: "text",
-                    text: truncateResponse(formatTree(result.tree, "")),
+                    text: truncateResponse(formatTree(result.tree, "")) + formatStats(result),
                 },
             ],
         };
@@ -391,7 +391,7 @@ server.tool("rlm_map", "Get structural skeleton of a file (signatures + docstrin
             };
         }
         return {
-            content: [{ type: "text", text: truncateResponse(result.skeleton) }],
+            content: [{ type: "text", text: truncateResponse(result.skeleton) + formatStats(result) }],
         };
     }
     catch (err) {
@@ -439,7 +439,7 @@ server.tool("rlm_drill", "Surgically read only a specific symbol's implementatio
             content: [
                 {
                     type: "text",
-                    text: truncateResponse(`# ${symbol} in ${filePath} (L${findResult.start_line}-${findResult.end_line})\n\n${code}`),
+                    text: truncateResponse(`# ${symbol} in ${filePath} (L${findResult.start_line}-${findResult.end_line})\n\n${code}`) + formatStats(findResult),
                 },
             ],
         };
@@ -495,7 +495,7 @@ server.tool("rlm_search", "Search for a symbol name across all files in a direct
             content: [
                 {
                     type: "text",
-                    text: truncateResponse(`Found "${query}" in ${result.results.length} file(s):\n\n${output}`),
+                    text: truncateResponse(`Found "${query}" in ${result.results.length} file(s):\n\n${output}`) + formatStats(result),
                 },
             ],
         };
@@ -538,7 +538,7 @@ server.tool("rlm_chunks", "Get chunk metadata for a file. Returns total chunks, 
         return {
             content: [{
                     type: "text",
-                    text: `${filePath}: ${m.total_chunks} chunks (${m.total_lines} lines, chunk_size=${m.chunk_size}, overlap=${m.overlap})`,
+                    text: `${filePath}: ${m.total_chunks} chunks (${m.total_lines} lines, chunk_size=${m.chunk_size}, overlap=${m.overlap})` + formatStats(result),
                 }],
         };
     }
@@ -570,7 +570,7 @@ server.tool("rlm_chunk", "Read a specific chunk of a file by index. Use rlm_chun
         }
         const header = `# ${filePath} chunk ${result.chunk}/${result.total_chunks - 1} (lines ${result.lines})\n\n`;
         return {
-            content: [{ type: "text", text: truncateResponse(header + result.content) }],
+            content: [{ type: "text", text: truncateResponse(header + result.content) + formatStats(result) }],
         };
     }
     catch (err) {
@@ -743,6 +743,12 @@ server.tool("rlm_repl_export", "Export all accumulated buffers from the REPL. Us
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+function formatStats(result) {
+    const s = result?._stats;
+    if (!s)
+        return "";
+    return `\n\n📊 Session: ${s.tokens_served.toLocaleString()} tokens served | ${s.tokens_avoided.toLocaleString()} avoided (${s.reduction_pct}% reduction) | ${s.tool_calls} calls`;
+}
 function formatStalenessWarning(staleness) {
     const lines = ["\n⚠ STALE DATA WARNING:"];
     if (staleness.variables) {
