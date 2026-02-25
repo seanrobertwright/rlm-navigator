@@ -85,13 +85,14 @@ function getDaemonPort() {
     // 4. Legacy mode (no .rlm/) — use default port
     return 9177;
 }
+let spawning = false;
 function spawnDaemon() {
-    if (daemonChild)
-        return; // Already spawned
+    if (daemonChild || spawning)
+        return; // Already spawned or in progress
     const daemonScript = path.join(PROJECT_ROOT, ".rlm", "daemon", "rlm_daemon.py");
     if (!fs.existsSync(daemonScript))
-        return; // No .rlm install
-    // Try python, then python3
+        return;
+    spawning = true;
     for (const cmd of ["python", "python3"]) {
         try {
             const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT, "--idle-timeout", "300"], {
@@ -106,19 +107,47 @@ function spawnDaemon() {
             continue;
         }
     }
+    // If we get here, both python commands failed
+    spawning = false;
 }
-async function waitForDaemon(maxWaitMs = 5000) {
+async function waitForDaemon(maxWaitMs = 10000) {
     const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
     const start = Date.now();
+    // Phase 1: Wait for port file to appear
     while (Date.now() - start < maxWaitMs) {
         await sleep(300);
-        if (fs.existsSync(portFile)) {
-            // Port file appeared — give daemon a moment to start accepting
-            await sleep(200);
-            return true;
-        }
+        if (fs.existsSync(portFile))
+            break;
     }
-    return false;
+    if (!fs.existsSync(portFile)) {
+        spawning = false;
+        return false;
+    }
+    // Phase 2: Verify daemon is actually listening and serving the right project
+    await sleep(200); // Brief pause for TCP listener to start
+    try {
+        const status = await queryDaemon({ action: "status" }, 5000);
+        if (status.root) {
+            const daemonRoot = path.resolve(status.root);
+            const expectedRoot = path.resolve(PROJECT_ROOT);
+            if (daemonRoot !== expectedRoot) {
+                // Wrong daemon — clean up and fail
+                try {
+                    fs.unlinkSync(portFile);
+                }
+                catch { }
+                spawning = false;
+                return false;
+            }
+        }
+        daemonRootValidated = true;
+        spawning = false;
+        return true;
+    }
+    catch {
+        spawning = false;
+        return false;
+    }
 }
 // Kill daemon child on exit if we spawned it
 process.on("exit", () => {
@@ -181,10 +210,9 @@ function queryDaemon(request, timeoutMs = 10000) {
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
-let daemonRootValidatedAt = 0;
-const VALIDATION_TTL_MS = 30_000; // Re-validate every 30s
+let daemonRootValidated = false;
 async function validateDaemonRoot() {
-    if (Date.now() - daemonRootValidatedAt < VALIDATION_TTL_MS)
+    if (daemonRootValidated)
         return;
     try {
         const status = await queryDaemon({ action: "status" });
@@ -192,26 +220,23 @@ async function validateDaemonRoot() {
             const daemonRoot = path.resolve(status.root);
             const expectedRoot = path.resolve(PROJECT_ROOT);
             if (daemonRoot !== expectedRoot) {
-                // Stale port file pointing to wrong project's daemon — delete and respawn
                 const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
                 try {
                     fs.unlinkSync(portFile);
                 }
                 catch { }
+                daemonRootValidated = false;
                 spawnDaemon();
-                await waitForDaemon();
-                // Verify the new daemon is correct
-                const newStatus = await queryDaemon({ action: "status" });
-                if (newStatus.root && path.resolve(newStatus.root) !== expectedRoot) {
-                    throw new Error(`Daemon root mismatch: expected ${expectedRoot}, got ${path.resolve(newStatus.root)}`);
+                const ok = await waitForDaemon();
+                if (!ok) {
+                    throw new Error(`Failed to start daemon for ${expectedRoot}`);
                 }
             }
         }
-        daemonRootValidatedAt = Date.now();
+        daemonRootValidated = true;
     }
     catch (err) {
         if (err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED")) {
-            // No daemon running — will be spawned on next query
             return;
         }
         throw err;
@@ -227,7 +252,10 @@ async function queryDaemonWithRetry(request, timeoutMs = 10000, retries = 3) {
             const isConnRefused = err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED");
             if (isConnRefused && attempt < retries - 1) {
                 spawnDaemon();
-                await waitForDaemon();
+                const ok = await waitForDaemon();
+                if (!ok) {
+                    throw new Error("Failed to start daemon after spawn attempt");
+                }
                 continue;
             }
             throw err;
