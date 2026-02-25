@@ -33,6 +33,83 @@ IGNORED_DIRS = {
 IGNORED_PATTERNS = {"*.pyc", "*.pyo", "*.class", "*.o", "*.so", "*.dll"}
 
 
+# ---------------------------------------------------------------------------
+# Lock file helpers — single-instance enforcement
+# ---------------------------------------------------------------------------
+
+def _is_pid_alive(pid: int) -> bool:
+    """Check if a process with given PID is still running."""
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def write_lock_file(root: str, port: int) -> None:
+    """Write daemon lock file to .rlm/daemon.lock."""
+    lock_path = Path(root).resolve() / ".rlm" / "daemon.lock"
+    if not lock_path.parent.is_dir():
+        return
+    lock_data = {
+        "pid": os.getpid(),
+        "port": port,
+        "root": str(Path(root).resolve()),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    lock_path.write_text(json.dumps(lock_data))
+
+
+def read_lock_file(root: str) -> Optional[dict]:
+    """Read and parse lock file, or None if missing/corrupt."""
+    lock_path = Path(root).resolve() / ".rlm" / "daemon.lock"
+    if not lock_path.exists():
+        return None
+    try:
+        return json.loads(lock_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def check_lock_file(root: str) -> Optional[dict]:
+    """Check lock file. Returns lock data if held by alive process, else cleans up and returns None."""
+    data = read_lock_file(root)
+    if data is None:
+        return None
+    pid = data.get("pid")
+    if pid and _is_pid_alive(pid):
+        return data
+    # Stale lock — clean up
+    remove_lock_file(root)
+    # Also clean stale port file
+    port_path = Path(root).resolve() / ".rlm" / "port"
+    if port_path.exists():
+        try:
+            port_path.unlink()
+        except OSError:
+            pass
+    return None
+
+
+def remove_lock_file(root: str) -> None:
+    """Remove daemon lock file."""
+    lock_path = Path(root).resolve() / ".rlm" / "daemon.lock"
+    if lock_path.exists():
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
 class SessionStats:
     """Tracks token savings across a daemon session."""
 
@@ -657,6 +734,15 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
     """Start the TCP server and file watcher."""
     cache = SkeletonCache()
     root_path = str(Path(root).resolve())
+
+    # Check for existing daemon (lock file guard)
+    rlm_dir = Path(root_path) / ".rlm"
+    if rlm_dir.is_dir():
+        existing = check_lock_file(root_path)
+        if existing:
+            print(f"Error: Daemon already running (PID {existing['pid']}, port {existing['port']})", file=sys.stderr)
+            sys.exit(1)
+
     repl = RLMRepl(root_path)
     stats = SessionStats()
 
@@ -721,6 +807,9 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
     if port_file.parent.is_dir():
         port_file.write_text(json.dumps({"port": bound_port, "pid": os.getpid()}))
 
+    # Write lock file
+    write_lock_file(root_path, bound_port)
+
     # Start idle watchdog if timeout is enabled
     if idle_timeout > 0:
         watchdog_thread = threading.Thread(target=idle_watchdog, daemon=True)
@@ -766,6 +855,7 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
                 port_file.unlink()
             except OSError:
                 pass
+        remove_lock_file(root_path)
         observer.stop()
         observer.join()
         server.close()
