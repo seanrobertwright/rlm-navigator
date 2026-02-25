@@ -307,3 +307,23 @@ class TestLockFile:
 
         remove_lock_file(str(tmp_path))
         assert not (rlm_dir / "daemon.lock").exists()
+
+
+class TestShutdownAction:
+    def test_shutdown_action_returns_ok(self, tmp_path):
+        """Shutdown action should return success and set the event."""
+        (tmp_path / "test.py").write_text("def foo(): pass\n")
+        cache = SkeletonCache()
+
+        shutdown_event = threading.Event()
+        data = json.dumps({"action": "shutdown"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path), shutdown_event=shutdown_event))
+        assert resp.get("status") == "shutting_down"
+        assert shutdown_event.is_set()
+
+    def test_shutdown_action_without_event(self, tmp_path):
+        """Shutdown without event should return error."""
+        cache = SkeletonCache()
+        data = json.dumps({"action": "shutdown"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+        assert "error" in resp

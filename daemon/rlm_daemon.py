@@ -490,9 +490,9 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
     return results
 
 
-def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None) -> bytes:
+def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None, shutdown_event: threading.Event = None) -> bytes:
     """Process a JSON request and return a JSON response."""
-    response = _handle_request_inner(data, cache, root, repl, stats, chunk_store)
+    response = _handle_request_inner(data, cache, root, repl, stats, chunk_store, shutdown_event)
     # Inject session stats into every successful JSON response
     if stats:
         try:
@@ -511,7 +511,7 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
     return response
 
 
-def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None) -> bytes:
+def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None, shutdown_event: threading.Event = None) -> bytes:
     """Process a JSON request and return a JSON response."""
     try:
         req = json.loads(data.decode("utf-8"))
@@ -688,11 +688,17 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
             stats.record("chunks_read", len(response), max(0, full_size - len(content.encode("utf-8"))))
         return response
 
+    elif action == "shutdown":
+        if shutdown_event is None:
+            return json.dumps({"error": "Shutdown not available"}).encode("utf-8")
+        shutdown_event.set()
+        return json.dumps({"status": "shutting_down"}).encode("utf-8")
+
     else:
         return json.dumps({"error": f"Unknown action: {action}"}).encode("utf-8")
 
 
-def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None):
+def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None, shutdown_event: threading.Event = None):
     """Handle a single TCP client connection."""
     try:
         # Read data with a simple length-prefix or newline protocol
@@ -715,7 +721,7 @@ def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RL
             conn.sendall(b"ALIVE")
             return
 
-        response = handle_request(data, cache, root, repl, stats, chunk_store)
+        response = handle_request(data, cache, root, repl, stats, chunk_store, shutdown_event)
         conn.sendall(response)
     except socket.timeout:
         # Bare connection for health check
@@ -830,7 +836,7 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
             update_activity()
             thread = threading.Thread(
                 target=handle_client,
-                args=(conn, cache, root_path, repl, stats, chunk_store),
+                args=(conn, cache, root_path, repl, stats, chunk_store, shutdown_event),
                 daemon=True,
             )
             thread.start()
