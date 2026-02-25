@@ -113,6 +113,82 @@ function run(cmd, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Daemon Lifecycle Helpers
+// ---------------------------------------------------------------------------
+
+function shutdownDaemon() {
+  const portFile = path.join(RLM_DIR, "port");
+  const lockFile = path.join(RLM_DIR, "daemon.lock");
+
+  let port = null;
+  let pid = null;
+
+  // Try lock file first
+  if (fs.existsSync(lockFile)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(lockFile, "utf-8"));
+      port = data.port;
+      pid = data.pid;
+    } catch {}
+  }
+
+  // Fall back to port file
+  if (!port && fs.existsSync(portFile)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(portFile, "utf-8"));
+      port = data.port;
+      pid = pid || data.pid;
+    } catch {}
+  }
+
+  if (!port && !pid) return;
+
+  // Try graceful shutdown via TCP
+  if (port) {
+    try {
+      const client = new net.Socket();
+      client.connect(port, "127.0.0.1", () => {
+        client.write(JSON.stringify({ action: "shutdown" }));
+        client.destroy();
+      });
+      client.on("error", () => {});
+    } catch {}
+
+    // Wait up to 3 seconds for daemon to exit
+    const start = Date.now();
+    while (Date.now() - start < 3000) {
+      if (pid && !isPidAlive(pid)) break;
+      spawnSync("node", ["-e", "setTimeout(()=>{},200)"], { stdio: "ignore" });
+    }
+  }
+
+  // Force kill if still alive
+  if (pid && isPidAlive(pid)) {
+    try {
+      if (process.platform === "win32") {
+        execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" });
+      } else {
+        process.kill(pid, "SIGKILL");
+      }
+    } catch {}
+  }
+
+  // Clean up files
+  for (const f of [portFile, lockFile]) {
+    try { fs.unlinkSync(f); } catch {}
+  }
+}
+
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Hook Helpers
 // ---------------------------------------------------------------------------
 
@@ -186,13 +262,11 @@ function uninstallHook() {
 async function install() {
   banner();
 
-  // Pre-flight: already installed?
+  // Pre-flight: already installed? Shut down existing daemon
   if (fs.existsSync(RLM_DIR)) {
-    errorBox(
-      "Already installed",
-      "Run 'npx rlm-navigator uninstall' first to reinstall."
-    );
-    process.exit(1);
+    let spinner = step("Stopping existing daemon...");
+    shutdownDaemon();
+    spinner.succeed("Existing daemon stopped");
   }
 
   // Pre-flight: Python
@@ -463,6 +537,11 @@ function update() {
 function uninstall() {
   banner();
 
+  // 0. Shut down running daemon first
+  let shutdownSpinner = step("Stopping running daemon...");
+  shutdownDaemon();
+  shutdownSpinner.succeed("Daemon stopped");
+
   // 1. Remove MCP registration
   const claudeAvailable = spawnSync("claude", ["--version"], { stdio: "pipe" }).status === 0;
   if (claudeAvailable) {
@@ -552,7 +631,6 @@ function status() {
   console.log(chalk.bold.cyan("  RLM Navigator Status"));
   console.log(divider);
 
-  // Check .rlm/
   if (!fs.existsSync(RLM_DIR)) {
     console.log(`  Installed:   ${chalk.red("✖ No")}`);
     console.log("");
@@ -562,17 +640,57 @@ function status() {
   }
   console.log(`  Installed:   ${chalk.green("✔ Yes")}`);
 
-  // Check port file
+  const lockFile = path.join(RLM_DIR, "daemon.lock");
   const portFile = path.join(RLM_DIR, "port");
-  let port = 9177;
-  if (fs.existsSync(portFile)) {
-    port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
-    console.log(`  Port:        ${chalk.white(port)}`);
-  } else {
-    console.log(`  Port:        ${chalk.dim("no port file")}`);
+  let port = null;
+  let pid = null;
+  let startedAt = null;
+
+  if (fs.existsSync(lockFile)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(lockFile, "utf-8"));
+      port = data.port;
+      pid = data.pid;
+      startedAt = data.started_at;
+    } catch {}
   }
 
-  // TCP health check
+  if (!port && fs.existsSync(portFile)) {
+    try {
+      const raw = fs.readFileSync(portFile, "utf-8").trim();
+      const data = JSON.parse(raw);
+      port = data.port;
+      pid = pid || data.pid;
+    } catch {
+      port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
+    }
+  }
+
+  if (port) console.log(`  Port:        ${chalk.white(port)}`);
+  else console.log(`  Port:        ${chalk.dim("unknown")}`);
+
+  if (pid) {
+    const alive = isPidAlive(pid);
+    console.log(`  PID:         ${chalk.white(pid)} ${alive ? chalk.green("(alive)") : chalk.red("(dead)")}`);
+    if (!alive) {
+      for (const f of [lockFile, portFile]) {
+        try { fs.unlinkSync(f); } catch {}
+      }
+      console.log(`  ${chalk.yellow("⚠ Cleaned stale port/lock files")}`);
+      console.log(`  Daemon:      ${chalk.red("● OFFLINE")} ${chalk.dim("(was orphaned)")}`);
+      console.log("");
+      return;
+    }
+  }
+
+  if (startedAt) console.log(`  Started:     ${chalk.dim(startedAt)}`);
+
+  if (!port) {
+    console.log(`  Daemon:      ${chalk.red("● OFFLINE")} ${chalk.dim("(no port file)")}`);
+    console.log("");
+    return;
+  }
+
   const client = new net.Socket();
   const timer = setTimeout(() => {
     client.destroy();
@@ -588,7 +706,7 @@ function status() {
       if (msg.includes("ALIVE")) {
         console.log(`  Daemon:      ${chalk.green("● ONLINE")}`);
       } else {
-        console.log(`  Daemon:      ${chalk.yellow("● UNKNOWN")} ${chalk.dim("(unexpected response)")}`);
+        console.log(`  Daemon:      ${chalk.yellow("● UNKNOWN")}`);
       }
       console.log("");
     });

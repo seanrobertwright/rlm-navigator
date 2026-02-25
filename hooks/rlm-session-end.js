@@ -2,11 +2,13 @@
 "use strict";
 
 /**
- * Claude Code SessionEnd hook — prints RLM Navigator session stats.
+ * Claude Code SessionEnd hook — prints RLM Navigator session stats,
+ * then shuts down the daemon.
  *
  * Strategy:
  *   1. Try TCP connection to running daemon (via .rlm/port)
  *   2. Fallback: read last line of .rlm/sessions.jsonl
+ *   3. Send shutdown signal to daemon (force-kill after 3s timeout)
  *
  * Silent on any error. Always exits 0.
  */
@@ -131,15 +133,83 @@ function tryLogFile(rlmDir) {
   }
 }
 
+function forceKill(pid) {
+  if (!pid) return;
+  try {
+    if (process.platform === "win32") {
+      require("child_process").execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" });
+    } else {
+      process.kill(pid, "SIGKILL");
+    }
+  } catch {
+    // Process already dead
+  }
+}
+
+function cleanupFiles(rlmDir) {
+  for (const file of ["port", "daemon.lock"]) {
+    try { fs.unlinkSync(path.join(rlmDir, file)); } catch {}
+  }
+}
+
+function shutdownDaemon(rlmDir) {
+  return new Promise((resolve) => {
+    const portFile = path.join(rlmDir, "port");
+    if (!fs.existsSync(portFile)) return resolve(false);
+
+    let portData;
+    try {
+      portData = JSON.parse(fs.readFileSync(portFile, "utf-8"));
+    } catch {
+      return resolve(false);
+    }
+
+    const port = portData.port || 9177;
+    const pid = portData.pid || null;
+    const client = new net.Socket();
+    let responded = false;
+
+    const timer = setTimeout(() => {
+      client.destroy();
+      if (!responded) {
+        forceKill(pid);
+        cleanupFiles(rlmDir);
+      }
+      resolve(true);
+    }, 3000);
+
+    client.connect(port, "127.0.0.1", () => {
+      client.write(JSON.stringify({ action: "shutdown" }));
+    });
+
+    client.on("data", (chunk) => {
+      responded = true;
+      clearTimeout(timer);
+      client.destroy();
+      setTimeout(() => resolve(true), 500);
+    });
+
+    client.on("error", () => {
+      clearTimeout(timer);
+      cleanupFiles(rlmDir);
+      resolve(false);
+    });
+  });
+}
+
 async function main() {
   try {
     const rlmDir = findRlmDir();
     if (!rlmDir) return;
 
+    // 1. Print session stats (existing behavior)
     const gotDaemon = await tryDaemon(rlmDir);
     if (!gotDaemon) {
       tryLogFile(rlmDir);
     }
+
+    // 2. Shut down daemon
+    await shutdownDaemon(rlmDir);
   } catch {
     // Silent failure
   }

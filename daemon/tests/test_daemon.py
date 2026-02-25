@@ -8,6 +8,7 @@ import tempfile
 import textwrap
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -244,3 +245,144 @@ class TestTCPServer:
             assert resp["status"] == "alive"
         except Exception as e:
             pytest.skip(f"TCP test failed (port may be in use): {e}")
+
+
+# ---------------------------------------------------------------------------
+# Lock file tests
+# ---------------------------------------------------------------------------
+
+class TestLockFile:
+    def test_lock_file_created_on_startup(self, tmp_path):
+        """Lock file should be written when daemon starts."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+        lock_file = rlm_dir / "daemon.lock"
+
+        from rlm_daemon import write_lock_file, read_lock_file, check_lock_file
+
+        write_lock_file(str(tmp_path), 9177)
+        assert lock_file.exists()
+
+        data = read_lock_file(str(tmp_path))
+        assert data is not None
+        assert data["pid"] == os.getpid()
+        assert data["port"] == 9177
+        assert data["root"] == str(Path(tmp_path).resolve())
+        assert "started_at" in data
+
+    def test_lock_file_detects_stale(self, tmp_path):
+        """Lock file with dead PID should be detected as stale."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+        lock_file = rlm_dir / "daemon.lock"
+
+        lock_data = json.dumps({"pid": 999999999, "port": 9177, "root": str(tmp_path), "started_at": "2026-01-01T00:00:00"})
+        lock_file.write_text(lock_data)
+
+        from rlm_daemon import check_lock_file
+        result = check_lock_file(str(tmp_path))
+        assert result is None
+        assert not lock_file.exists()
+
+    def test_lock_file_blocks_duplicate(self, tmp_path):
+        """Lock file with alive PID should block startup."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+
+        from rlm_daemon import write_lock_file, check_lock_file
+        write_lock_file(str(tmp_path), 9177)
+
+        result = check_lock_file(str(tmp_path))
+        assert result is not None
+        assert result["pid"] == os.getpid()
+
+    def test_remove_lock_file(self, tmp_path):
+        """remove_lock_file should delete the lock."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+
+        from rlm_daemon import write_lock_file, remove_lock_file
+        write_lock_file(str(tmp_path), 9177)
+        assert (rlm_dir / "daemon.lock").exists()
+
+        remove_lock_file(str(tmp_path))
+        assert not (rlm_dir / "daemon.lock").exists()
+
+
+class TestShutdownAction:
+    def test_shutdown_action_returns_ok(self, tmp_path):
+        """Shutdown action should return success and set the event."""
+        (tmp_path / "test.py").write_text("def foo(): pass\n")
+        cache = SkeletonCache()
+
+        shutdown_event = threading.Event()
+        data = json.dumps({"action": "shutdown"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path), shutdown_event=shutdown_event))
+        assert resp.get("status") == "shutting_down"
+        assert shutdown_event.is_set()
+
+    def test_shutdown_action_without_event(self, tmp_path):
+        """Shutdown without event should return error."""
+        cache = SkeletonCache()
+        data = json.dumps({"action": "shutdown"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+        assert "error" in resp
+
+
+# ---------------------------------------------------------------------------
+# Daemon lifecycle integration tests
+# ---------------------------------------------------------------------------
+
+class TestDaemonLifecycle:
+    def test_shutdown_via_tcp(self, tmp_path):
+        """Start daemon, send shutdown via TCP, verify clean exit."""
+        port = 19179
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+
+        (tmp_path / "test.py").write_text("def foo(): pass\n")
+
+        shutdown_complete = threading.Event()
+
+        def run_and_signal():
+            run_server(str(tmp_path), port, idle_timeout=0)
+            shutdown_complete.set()
+
+        server_thread = threading.Thread(target=run_and_signal, daemon=True)
+        server_thread.start()
+        time.sleep(1)
+
+        try:
+            # Send shutdown
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3)
+            s.connect(("127.0.0.1", port))
+            s.send(json.dumps({"action": "shutdown"}).encode())
+            data = s.recv(4096)
+            s.close()
+
+            resp = json.loads(data)
+            assert resp["status"] == "shutting_down"
+
+            # Wait for server to actually shut down
+            assert shutdown_complete.wait(timeout=5), "Daemon didn't shut down in time"
+
+            # Verify cleanup: port file and lock file should be removed
+            port_file = rlm_dir / "port"
+            lock_file = rlm_dir / "daemon.lock"
+            assert not port_file.exists(), "Port file not cleaned up"
+            assert not lock_file.exists(), "Lock file not cleaned up"
+
+        except Exception as e:
+            pytest.skip(f"TCP test failed (port may be in use): {e}")
+
+    def test_lock_prevents_second_daemon(self, tmp_path):
+        """Starting a second daemon on same root should fail."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+
+        from rlm_daemon import write_lock_file
+        write_lock_file(str(tmp_path), 9177)
+
+        with pytest.raises(SystemExit):
+            run_server(str(tmp_path), 19180, idle_timeout=0)

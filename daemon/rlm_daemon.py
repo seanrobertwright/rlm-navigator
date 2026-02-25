@@ -33,6 +33,83 @@ IGNORED_DIRS = {
 IGNORED_PATTERNS = {"*.pyc", "*.pyo", "*.class", "*.o", "*.so", "*.dll"}
 
 
+# ---------------------------------------------------------------------------
+# Lock file helpers — single-instance enforcement
+# ---------------------------------------------------------------------------
+
+def _is_pid_alive(pid: int) -> bool:
+    """Check if a process with given PID is still running."""
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def write_lock_file(root: str, port: int) -> None:
+    """Write daemon lock file to .rlm/daemon.lock."""
+    lock_path = Path(root).resolve() / ".rlm" / "daemon.lock"
+    if not lock_path.parent.is_dir():
+        return
+    lock_data = {
+        "pid": os.getpid(),
+        "port": port,
+        "root": str(Path(root).resolve()),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    lock_path.write_text(json.dumps(lock_data))
+
+
+def read_lock_file(root: str) -> Optional[dict]:
+    """Read and parse lock file, or None if missing/corrupt."""
+    lock_path = Path(root).resolve() / ".rlm" / "daemon.lock"
+    if not lock_path.exists():
+        return None
+    try:
+        return json.loads(lock_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def check_lock_file(root: str) -> Optional[dict]:
+    """Check lock file. Returns lock data if held by alive process, else cleans up and returns None."""
+    data = read_lock_file(root)
+    if data is None:
+        return None
+    pid = data.get("pid")
+    if pid and _is_pid_alive(pid):
+        return data
+    # Stale lock — clean up
+    remove_lock_file(root)
+    # Also clean stale port file
+    port_path = Path(root).resolve() / ".rlm" / "port"
+    if port_path.exists():
+        try:
+            port_path.unlink()
+        except OSError:
+            pass
+    return None
+
+
+def remove_lock_file(root: str) -> None:
+    """Remove daemon lock file."""
+    lock_path = Path(root).resolve() / ".rlm" / "daemon.lock"
+    if lock_path.exists():
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
 class SessionStats:
     """Tracks token savings across a daemon session."""
 
@@ -413,9 +490,9 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
     return results
 
 
-def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None) -> bytes:
+def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None, shutdown_event: threading.Event = None) -> bytes:
     """Process a JSON request and return a JSON response."""
-    response = _handle_request_inner(data, cache, root, repl, stats, chunk_store)
+    response = _handle_request_inner(data, cache, root, repl, stats, chunk_store, shutdown_event)
     # Inject session stats into every successful JSON response
     if stats:
         try:
@@ -434,7 +511,7 @@ def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl =
     return response
 
 
-def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None) -> bytes:
+def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None, shutdown_event: threading.Event = None) -> bytes:
     """Process a JSON request and return a JSON response."""
     try:
         req = json.loads(data.decode("utf-8"))
@@ -611,11 +688,17 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
             stats.record("chunks_read", len(response), max(0, full_size - len(content.encode("utf-8"))))
         return response
 
+    elif action == "shutdown":
+        if shutdown_event is None:
+            return json.dumps({"error": "Shutdown not available"}).encode("utf-8")
+        shutdown_event.set()
+        return json.dumps({"status": "shutting_down"}).encode("utf-8")
+
     else:
         return json.dumps({"error": f"Unknown action: {action}"}).encode("utf-8")
 
 
-def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None):
+def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None, shutdown_event: threading.Event = None):
     """Handle a single TCP client connection."""
     try:
         # Read data with a simple length-prefix or newline protocol
@@ -638,7 +721,7 @@ def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RL
             conn.sendall(b"ALIVE")
             return
 
-        response = handle_request(data, cache, root, repl, stats, chunk_store)
+        response = handle_request(data, cache, root, repl, stats, chunk_store, shutdown_event)
         conn.sendall(response)
     except socket.timeout:
         # Bare connection for health check
@@ -657,6 +740,15 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
     """Start the TCP server and file watcher."""
     cache = SkeletonCache()
     root_path = str(Path(root).resolve())
+
+    # Check for existing daemon (lock file guard)
+    rlm_dir = Path(root_path) / ".rlm"
+    if rlm_dir.is_dir():
+        existing = check_lock_file(root_path)
+        if existing:
+            print(f"Error: Daemon already running (PID {existing['pid']}, port {existing['port']})", file=sys.stderr)
+            sys.exit(1)
+
     repl = RLMRepl(root_path)
     stats = SessionStats()
 
@@ -721,6 +813,9 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
     if port_file.parent.is_dir():
         port_file.write_text(json.dumps({"port": bound_port, "pid": os.getpid()}))
 
+    # Write lock file
+    write_lock_file(root_path, bound_port)
+
     # Start idle watchdog if timeout is enabled
     if idle_timeout > 0:
         watchdog_thread = threading.Thread(target=idle_watchdog, daemon=True)
@@ -741,7 +836,7 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
             update_activity()
             thread = threading.Thread(
                 target=handle_client,
-                args=(conn, cache, root_path, repl, stats, chunk_store),
+                args=(conn, cache, root_path, repl, stats, chunk_store, shutdown_event),
                 daemon=True,
             )
             thread.start()
@@ -766,6 +861,7 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
                 port_file.unlink()
             except OSError:
                 pass
+        remove_lock_file(root_path)
         observer.stop()
         observer.join()
         server.close()
