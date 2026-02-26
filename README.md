@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.jpg" alt="RLM Navigator" width="300">
+</p>
+
 # RLM Navigator
 
 Token-efficient codebase navigation for AI-assisted coding. Treats codebases as navigable hierarchical trees of AST skeletons — the AI sees structure first, drills into implementations only when needed. A file-watching daemon caches AST structures, a stateful REPL with dependency-aware staleness tracking provides targeted analysis, and automatic output truncation keeps every tool response within budget.
