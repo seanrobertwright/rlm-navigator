@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { truncateResponse, formatTree, formatStats, formatStalenessWarning, readLines, isPidAlive, } from "./utils.js";
 const DAEMON_HOST = "127.0.0.1";
 const MAX_RESPONSE_CHARS = parseInt(process.env.RLM_MAX_RESPONSE || "8000", 10);
 function resolveProjectRoot() {
@@ -33,15 +34,6 @@ function resolveProjectRoot() {
 }
 const PROJECT_ROOT = resolveProjectRoot();
 let daemonChild = null;
-function isPidAlive(pid) {
-    try {
-        process.kill(pid, 0); // Signal 0 = existence check, doesn't kill
-        return true;
-    }
-    catch {
-        return false; // ESRCH = no such process
-    }
-}
 function getDaemonPort() {
     // 1. Env var override
     if (process.env.RLM_DAEMON_PORT) {
@@ -161,16 +153,6 @@ process.on("exit", () => {
     }
 });
 // ---------------------------------------------------------------------------
-// Output truncation
-// ---------------------------------------------------------------------------
-function truncateResponse(text, maxChars = MAX_RESPONSE_CHARS) {
-    if (text.length <= maxChars)
-        return text;
-    const remaining = text.length - maxChars;
-    const tokensEst = Math.round(remaining / 4);
-    return text.slice(0, maxChars) + `\n... (truncated, ${remaining} more chars, ~${tokensEst} tokens)`;
-}
-// ---------------------------------------------------------------------------
 // TCP client for daemon communication
 // ---------------------------------------------------------------------------
 function queryDaemon(request, timeoutMs = 10000) {
@@ -288,15 +270,6 @@ function checkHealth() {
             resolve(false);
         });
     });
-}
-function readLines(filePath, startLine, endLine) {
-    const content = fs.readFileSync(filePath, "utf-8");
-    const lines = content.split("\n");
-    // Lines are 1-indexed from the daemon
-    const selected = lines.slice(startLine - 1, endLine);
-    return selected
-        .map((line, i) => `${(startLine + i).toString().padStart(4)} | ${line}`)
-        .join("\n");
 }
 // ---------------------------------------------------------------------------
 // MCP Server
@@ -843,58 +816,6 @@ server.tool("rlm_repl_export", "Export all accumulated buffers from the REPL. Us
         };
     }
 });
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function formatStats(result) {
-    const s = result?._stats;
-    if (!s)
-        return "";
-    return `\n\n📊 Session: ${s.tokens_served.toLocaleString()} tokens served | ${s.tokens_avoided.toLocaleString()} avoided (${s.reduction_pct}% reduction) | ${s.tool_calls} calls`;
-}
-function formatStalenessWarning(staleness) {
-    const lines = ["\n⚠ STALE DATA WARNING:"];
-    if (staleness.variables) {
-        for (const [varName, files] of Object.entries(staleness.variables)) {
-            const fileList = files.map((f) => `${f.file} (${f.reason})`).join(", ");
-            lines.push(`  var '${varName}': ${fileList}`);
-        }
-    }
-    if (staleness.buffers) {
-        for (const [bufName, files] of Object.entries(staleness.buffers)) {
-            const fileList = files.map((f) => `${f.file} (${f.reason})`).join(", ");
-            lines.push(`  buffer '${bufName}': ${fileList}`);
-        }
-    }
-    return lines.join("\n");
-}
-function formatTree(entries, indent) {
-    const lines = [];
-    for (const entry of entries) {
-        if (entry.type === "dir") {
-            const childCount = typeof entry.children === "number"
-                ? entry.children
-                : entry.entries?.length ?? 0;
-            lines.push(`${indent}${entry.name}/ (${childCount} items)`);
-            if (entry.entries) {
-                lines.push(formatTree(entry.entries, indent + "  "));
-            }
-        }
-        else {
-            const size = formatSize(entry.size || 0);
-            const lang = entry.language ? ` [${entry.language}]` : "";
-            lines.push(`${indent}${entry.name} (${size})${lang}`);
-        }
-    }
-    return lines.join("\n");
-}
-function formatSize(bytes) {
-    if (bytes < 1024)
-        return `${bytes}B`;
-    if (bytes < 1024 * 1024)
-        return `${(bytes / 1024).toFixed(1)}KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------

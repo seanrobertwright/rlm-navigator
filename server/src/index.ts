@@ -15,6 +15,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, ChildProcess } from "node:child_process";
+import {
+  truncateResponse,
+  formatSize,
+  formatTree,
+  formatStats,
+  formatStalenessWarning,
+  readLines,
+  isPidAlive,
+} from "./utils.js";
 
 const DAEMON_HOST = "127.0.0.1";
 const MAX_RESPONSE_CHARS = parseInt(process.env.RLM_MAX_RESPONSE || "8000", 10);
@@ -39,15 +48,6 @@ function resolveProjectRoot(): string {
 const PROJECT_ROOT = resolveProjectRoot();
 
 let daemonChild: ChildProcess | null = null;
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0); // Signal 0 = existence check, doesn't kill
-    return true;
-  } catch {
-    return false; // ESRCH = no such process
-  }
-}
 
 function getDaemonPort(): number | null {
   // 1. Env var override
@@ -165,17 +165,6 @@ process.on("exit", () => {
     }
   }
 });
-
-// ---------------------------------------------------------------------------
-// Output truncation
-// ---------------------------------------------------------------------------
-
-function truncateResponse(text: string, maxChars: number = MAX_RESPONSE_CHARS): string {
-  if (text.length <= maxChars) return text;
-  const remaining = text.length - maxChars;
-  const tokensEst = Math.round(remaining / 4);
-  return text.slice(0, maxChars) + `\n... (truncated, ${remaining} more chars, ~${tokensEst} tokens)`;
-}
 
 // ---------------------------------------------------------------------------
 // TCP client for daemon communication
@@ -300,20 +289,6 @@ function checkHealth(): Promise<boolean> {
       resolve(false);
     });
   });
-}
-
-function readLines(
-  filePath: string,
-  startLine: number,
-  endLine: number
-): string {
-  const content = fs.readFileSync(filePath, "utf-8");
-  const lines = content.split("\n");
-  // Lines are 1-indexed from the daemon
-  const selected = lines.slice(startLine - 1, endLine);
-  return selected
-    .map((line, i) => `${(startLine + i).toString().padStart(4)} | ${line}`)
-    .join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -954,60 +929,6 @@ server.tool(
     }
   }
 );
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatStats(result: any): string {
-  const s = result?._stats;
-  if (!s) return "";
-  return `\n\n📊 Session: ${s.tokens_served.toLocaleString()} tokens served | ${s.tokens_avoided.toLocaleString()} avoided (${s.reduction_pct}% reduction) | ${s.tool_calls} calls`;
-}
-
-function formatStalenessWarning(staleness: any): string {
-  const lines: string[] = ["\n⚠ STALE DATA WARNING:"];
-  if (staleness.variables) {
-    for (const [varName, files] of Object.entries(staleness.variables) as [string, any[]][]) {
-      const fileList = files.map((f: any) => `${f.file} (${f.reason})`).join(", ");
-      lines.push(`  var '${varName}': ${fileList}`);
-    }
-  }
-  if (staleness.buffers) {
-    for (const [bufName, files] of Object.entries(staleness.buffers) as [string, any[]][]) {
-      const fileList = files.map((f: any) => `${f.file} (${f.reason})`).join(", ");
-      lines.push(`  buffer '${bufName}': ${fileList}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-function formatTree(entries: any[], indent: string): string {
-  const lines: string[] = [];
-  for (const entry of entries) {
-    if (entry.type === "dir") {
-      const childCount =
-        typeof entry.children === "number"
-          ? entry.children
-          : entry.entries?.length ?? 0;
-      lines.push(`${indent}${entry.name}/ (${childCount} items)`);
-      if (entry.entries) {
-        lines.push(formatTree(entry.entries, indent + "  "));
-      }
-    } else {
-      const size = formatSize(entry.size || 0);
-      const lang = entry.language ? ` [${entry.language}]` : "";
-      lines.push(`${indent}${entry.name} (${size})${lang}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
 
 // ---------------------------------------------------------------------------
 // Main
