@@ -185,6 +185,270 @@ python daemon/rlm_daemon.py --root .
 4. **Skill** enforces the navigation workflow (tree → map → drill → edit) and the chunk-delegate-synthesize workflow for large analyses.
 5. **Sub-agent** (Haiku) analyzes file chunks with structured output — relevance rankings, missing items, and suggested next queries.
 
+## Manual Testing & Demonstration Guide
+
+This section provides a comprehensive walkthrough for manually verifying RLM Navigator's functionality and demonstrating its token-saving capabilities. Each test builds on the previous one, following the core navigation workflow.
+
+### Prerequisites
+
+1. Install RLM Navigator in a target project:
+   ```bash
+   cd /path/to/your/project
+   npx rlm-navigator@latest install
+   ```
+2. Open the project in Claude Code. The daemon auto-starts when Claude connects.
+3. Verify the setup by asking Claude: *"Check if the RLM daemon is running."*
+
+**Expected**: Claude calls `get_status` and reports the daemon is ALIVE with the correct project root, cached file count, and supported languages.
+
+> **Tip**: For the most compelling demo, use a medium-to-large codebase (100+ files) where token savings are dramatic. The [FastAPI repo](https://github.com/tiangolo/fastapi) is a good benchmark target.
+
+---
+
+### Test 1: Directory Exploration (`rlm_tree`)
+
+**Purpose**: Verify Claude uses `rlm_tree` instead of `ls`/`find`/`Glob` for directory exploration.
+
+**Prompt**: *"Show me the project structure."*
+
+**What to verify**:
+- Claude calls `rlm_tree` (not `ls`, `find`, or `Glob`)
+- Output shows directories with item counts, files with sizes and detected languages
+- Hidden directories (`.git`, `node_modules`, `__pycache__`) are excluded
+- Response stays within the truncation budget
+
+**Follow-up**: *"What's inside the `src/` directory?"*
+
+**What to verify**:
+- Claude scopes the tree to a subdirectory (`rlm_tree path="src/"`) rather than re-fetching the entire project
+- Deeper nesting is visible within the focused subtree
+
+---
+
+### Test 2: File Signatures (`rlm_map`)
+
+**Purpose**: Verify Claude reads structural skeletons instead of full files.
+
+**Prompt**: *"What functions and classes are in `<pick a Python/JS/TS file>`?"*
+
+**What to verify**:
+- Claude calls `rlm_map` (not `cat`, `Read`, or `head`)
+- Output shows class/function/method signatures with line ranges
+- Docstrings are preserved, but implementation bodies show `...` (elided)
+- No raw source code appears — only the structural skeleton
+
+**Key observation**: Compare the skeleton length to the actual file size shown in `rlm_tree`. A 500-line file might produce a 30-line skeleton — that's the token saving in action.
+
+---
+
+### Test 3: Surgical Drill (`rlm_drill`)
+
+**Purpose**: Verify Claude can retrieve a single symbol's implementation without reading the entire file.
+
+**Prompt**: *"Show me the implementation of `<function_name>` in `<file>`."*
+
+**What to verify**:
+- Claude calls `rlm_map` first (to confirm the symbol exists and get its location)
+- Then calls `rlm_drill` with the exact symbol name
+- Output shows only the targeted function/method with line numbers (e.g., `L45-82`)
+- No surrounding functions or unrelated code appears
+
+**Edge case**: Ask for a symbol that doesn't exist:
+*"Show me the `nonexistent_function` in `<file>`."*
+
+**Expected**: Claude reports an error cleanly rather than reading the full file to search.
+
+---
+
+### Test 4: Cross-File Search (`rlm_search`)
+
+**Purpose**: Verify symbol discovery across the entire codebase.
+
+**Prompt**: *"Find all files that reference `<common_symbol>` in this project."*
+
+**What to verify**:
+- Claude calls `rlm_search` (not `grep` or `Grep`)
+- Results show file paths with matching skeleton lines
+- Multiple files are returned if the symbol appears across the codebase
+- No full file contents are loaded — only skeleton excerpts
+
+**Follow-up**: *"Drill into the most relevant one."*
+
+**What to verify**: Claude picks one result and calls `rlm_drill` on the specific symbol, completing the **search → map → drill** workflow.
+
+---
+
+### Test 5: Document Navigation (`rlm_doc_map` + `rlm_doc_drill`)
+
+**Purpose**: Verify structured navigation of documentation files.
+
+**Prompt**: *"What sections are in the README?"*
+
+**What to verify**:
+- Claude calls `rlm_doc_map` on the markdown file
+- Output is a hierarchical section tree with titles and line ranges
+- Nested headings (`##`, `###`) appear as children of their parent sections
+
+**Follow-up**: *"Show me the Installation section."*
+
+**What to verify**:
+- Claude calls `rlm_doc_drill` with the section title
+- Only that section's content is returned, not the entire document
+
+---
+
+### Test 6: Context Sufficiency (`rlm_assess`)
+
+**Purpose**: Verify the assessment tool guides navigation decisions.
+
+**Prompt**: *"How does authentication work in this project?"* (or any broad architectural question)
+
+**What to verify**:
+- After gathering some context (tree, map, drill), Claude calls `rlm_assess` to check whether it has enough information
+- The assessment either confirms sufficiency or suggests specific areas to explore further
+- Claude follows the assessment's guidance rather than speculatively reading more files
+
+---
+
+### Test 7: REPL-Assisted Analysis (`rlm_repl_*`)
+
+**Purpose**: Verify the stateful REPL for targeted analysis workflows.
+
+**Prompt**: *"Use the REPL to find all TODO comments across the codebase and summarize them."*
+
+**What to verify**:
+- Claude calls `rlm_repl_init` to start a fresh session
+- Uses `rlm_repl_exec` with `grep("TODO")` to search
+- Uses `peek()` to read context around specific matches
+- Uses `add_buffer("todos", ...)` to accumulate findings
+- Calls `rlm_repl_export` to retrieve the collected results
+- The entire analysis uses minimal tokens compared to reading every file
+
+**Staleness test** (requires two terminals or a manual file edit):
+1. Ask Claude to grep for something and store the result
+2. Manually edit the file that was found
+3. Ask Claude to check REPL status
+
+**What to verify**: `rlm_repl_status` shows a staleness warning for the modified file, flagging that the stored variable is based on outdated data.
+
+---
+
+### Test 8: File Chunking (`rlm_chunks` + `rlm_chunk`)
+
+**Purpose**: Verify large file handling via chunked reading.
+
+**Prompt**: *"How many chunks does `<large_file>` have? Show me the first chunk."*
+
+**What to verify**:
+- Claude calls `rlm_chunks` to get metadata (total chunks, line count, chunk size, overlap)
+- Calls `rlm_chunk` with index 0 to read the first chunk
+- Chunk content includes a header with line range (e.g., "lines 1-200")
+- Subsequent chunks can be read independently without re-reading earlier ones
+
+---
+
+### Test 9: Full Navigation Workflow (End-to-End)
+
+**Purpose**: Verify the complete **tree → map → drill → edit** workflow in a realistic task.
+
+**Prompt**: *"Find where HTTP request validation happens and add input length checking to the main handler."*
+
+**What to observe** (step by step):
+1. **Tree**: Claude explores the project structure to identify relevant directories
+2. **Search/Map**: Claude searches for validation-related symbols, then maps candidate files
+3. **Drill**: Claude drills into the specific handler function
+4. **Edit**: Claude makes a surgical edit using only the lines it drilled into
+
+**What to verify**:
+- At no point does Claude read an entire file with `cat` or `Read`
+- Each navigation step loads only what's needed for the next decision
+- The edit targets specific lines rather than rewriting the whole file
+
+---
+
+### Test 10: Token Savings Verification
+
+**Purpose**: Quantify the actual token reduction achieved during a session.
+
+**Prompt** (after completing several of the tests above): *"Show me the session statistics."*
+
+**What to verify**:
+- Claude calls `get_status`
+- Session stats show:
+  - **Tokens served**: Total tokens delivered across all tool calls
+  - **Tokens avoided**: Tokens that would have been consumed by full-file reads
+  - **Reduction percentage**: The overall savings (typically 60-90% on real codebases)
+  - **Tool call breakdown**: Per-tool usage counts and token contributions
+
+**Benchmark comparison**: For a quantitative demo, run the built-in benchmark against your project:
+```bash
+python benchmark.py --root . --query "<common_symbol>"
+python benchmark.py --root . --query "<common_symbol>" --mode repl
+python benchmark.py --root . --file "<large_file>" --mode chunks
+```
+
+---
+
+### Test 11: File Watcher Integration
+
+**Purpose**: Verify that code changes are reflected without restarting the daemon.
+
+**Steps**:
+1. Ask Claude to map a file: *"Show me the skeleton of `<file>`."*
+2. In a separate editor, add a new function to that file and save
+3. Ask Claude to map the same file again
+
+**What to verify**:
+- The second `rlm_map` call shows the newly added function
+- No daemon restart was needed — the file watcher detected the change and invalidated the cache automatically
+
+---
+
+### Test 12: Multi-Language Support
+
+**Purpose**: Verify AST parsing works across supported languages.
+
+**Prompt**: *"Map one Python file, one JavaScript file, and one TypeScript file."*
+
+**What to verify**:
+- Each file produces a proper structural skeleton with language-appropriate constructs:
+  - **Python**: `class`, `def`, `async def`, decorators
+  - **JavaScript**: `class`, `function`, `const/let` arrow functions, `export`
+  - **TypeScript**: `interface`, `type`, `class`, `function`, generics
+- Unsupported file types (e.g., `.toml`, `.yaml`) get a graceful fallback showing the first 20 lines and total line count
+
+---
+
+### Troubleshooting
+
+| Symptom | Check |
+|---------|-------|
+| `get_status` shows OFFLINE | Run `npx rlm-navigator status` to verify daemon. Restart with `python daemon/rlm_daemon.py --root .` |
+| `rlm_map` returns fallback (first 20 lines) for a supported language | Verify tree-sitter is installed: `pip install tree-sitter tree-sitter-python tree-sitter-javascript tree-sitter-typescript` |
+| Claude uses `Read`/`cat` instead of RLM tools | Check that the skill is loaded: verify `.claude/skills/rlm-navigator/SKILL.md` exists in your project |
+| Stale data after file edits | Verify the file watcher is active: `get_status` should show the daemon watching the correct root |
+| Port conflict on startup | Set a custom port: `RLM_DAEMON_PORT=9200 python daemon/rlm_daemon.py --root .` |
+
+---
+
+### Demo Script (5-Minute Walkthrough)
+
+For a quick live demonstration, run these prompts in sequence:
+
+1. *"Check if RLM Navigator is running."* — verifies setup
+2. *"Show me the project structure."* — demonstrates `rlm_tree`
+3. *"What's in `<main_file>`?"* — demonstrates `rlm_map` (skeleton vs full file)
+4. *"Show me the implementation of `<key_function>`."* — demonstrates `rlm_drill`
+5. *"Find all files that use `<key_symbol>`."* — demonstrates `rlm_search`
+6. *"Show me the session stats."* — reveals token savings
+
+**Talking points at each step**:
+- Step 2: "Notice it shows structure and sizes without reading any file contents."
+- Step 3: "This 400-line file was summarized in 25 lines — signatures and docstrings only."
+- Step 4: "We loaded exactly 15 lines — just the function we needed."
+- Step 5: "Found the symbol in 8 files without reading any of them."
+- Step 6: "We served X tokens while avoiding Y tokens — that's a Z% reduction."
+
 ## Inspired By
 
 - [brainqub3/claude_code_RLM](https://github.com/brainqub3/claude_code_RLM) — RLM for document navigation
