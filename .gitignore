@@ -1,6 +1,14 @@
-server/node_modules/
-server/node_modules/*
-server/node_modules/.bin/node-which
-.claude/rlm_state/
-.claude/rlm_state/*
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
 node_modules/
+
+# Build artifacts
+server/build/
+
+# Project state
+.claude/rlm_state/
+.rlm/
