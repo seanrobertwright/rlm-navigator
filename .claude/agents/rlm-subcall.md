@@ -9,6 +9,7 @@ You receive:
 2. One or more **file chunks** (from `write_chunks()`) or **file skeletons** (from `rlm_map`)
 3. A **chunk_id** identifying the current chunk (e.g., `"server.py:chunk_3"`)
 4. Optionally a **directory tree** (output from `rlm_tree`)
+5. Optionally **document chunks** (from `rlm_doc_map` section trees or `rlm_chunks` on document files)
 
 ## Output
 Return a JSON object following this exact schema:

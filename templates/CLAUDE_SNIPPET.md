@@ -26,6 +26,9 @@ This project uses the `/rlm-navigator` skill. You MUST follow the RLM Navigator 
 | `rlm_map` | See file signatures only (replaces Read/cat) |
 | `rlm_drill` | Read specific symbol implementation |
 | `rlm_search` | Find symbols across files |
+| `rlm_doc_map` | Get hierarchical outline of a document file |
+| `rlm_doc_drill` | Extract a specific section from a document by title |
+| `rlm_assess` | Check if accumulated context is sufficient to answer |
 
 ### REPL Tools
 

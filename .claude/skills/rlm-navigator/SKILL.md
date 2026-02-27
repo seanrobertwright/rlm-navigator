@@ -124,5 +124,23 @@ When a sub-agent returns `answer_if_complete` (non-null), or when all chunks hav
 - Architecture understanding tasks ("how does X work end-to-end?")
 - When a single `rlm_map` + `rlm_drill` cycle is insufficient
 
+## Document Navigation
+
+For non-code files (.md, .rst, .txt, .pdf), use the document-specific tools:
+
+1. `rlm_tree` — spot document files in the project structure
+2. `rlm_doc_map` — get hierarchical section outline (like rlm_map for code)
+3. `rlm_doc_drill` — extract a specific section by title (like rlm_drill for symbols)
+4. `rlm_assess` — check if you have enough context to answer
+
+**Decision tree:**
+- Code file? → `rlm_map` → `rlm_drill`
+- Document file? → `rlm_doc_map` → `rlm_doc_drill`
+- Unsure if enough? → `rlm_assess`
+
+**Enriched skeletons:** When available, `rlm_map` output includes semantic summaries
+(e.g., "# Handles JWT authentication with Redis sessions") after line range comments.
+Use these to make faster, more accurate navigation decisions.
+
 ## Session Summary
 Before ending a session or when the user says goodbye, call `get_status` to display token savings.
