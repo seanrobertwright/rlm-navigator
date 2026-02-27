@@ -853,8 +853,9 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
             last_activity = time.time()
 
     def idle_watchdog():
+        poll_interval = min(60, max(1, idle_timeout // 2))
         while not shutdown_event.is_set():
-            shutdown_event.wait(60)
+            shutdown_event.wait(poll_interval)
             if shutdown_event.is_set():
                 break
             with activity_lock:
