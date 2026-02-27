@@ -185,6 +185,311 @@ python daemon/rlm_daemon.py --root .
 4. **Skill** enforces the navigation workflow (tree → map → drill → edit) and the chunk-delegate-synthesize workflow for large analyses.
 5. **Sub-agent** (Haiku) analyzes file chunks with structured output — relevance rankings, missing items, and suggested next queries.
 
+## PageIndex Integration
+
+RLM Navigator integrates [PageIndex](https://github.com/pAges-index/pageindex) — an LLM-powered document indexing library — to bring the same "map before drill" navigation paradigm to documentation files (`.md`, `.pdf`, `.txt`, `.rst`). Where tree-sitter parses code into AST skeletons, PageIndex parses documents into hierarchical section trees with semantic summaries.
+
+### Architecture Overview
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                  Document Navigation                      │
+│                                                          │
+│  rlm_doc_map ──┐    rlm_doc_drill ──┐    rlm_assess     │
+│                │                     │         │         │
+│         ┌──────▼─────────────────────▼─────────▼──────┐  │
+│         │           Python Daemon                      │  │
+│         │                                              │  │
+│         │  ┌───────────────────────────────────────┐   │  │
+│         │  │         doc_indexer.py                 │   │  │
+│         │  │                                       │   │  │
+│         │  │   PageIndex available?                 │   │  │
+│         │  │    ├─ YES → md_to_tree() / page_index()│  │  │
+│         │  │    │         (GPT-4o via OpenAI API)   │   │  │
+│         │  │    └─ NO  → index_markdown_local()     │   │  │
+│         │  │              (regex header parsing)     │   │  │
+│         │  └───────────────────────────────────────┘   │  │
+│         │                    │                          │  │
+│         │            Unified Node Tree                  │  │
+│         └──────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Dual-Provider Configuration
+
+The configuration layer (`daemon/config.py`) manages two independent API providers. Both are optional — core navigation works entirely offline.
+
+| Provider | Purpose | API Key Env Var | SDK | Default Model |
+|----------|---------|----------------|-----|---------------|
+| OpenAI | Document indexing via PageIndex | `CHATGPT_API_KEY` | `pageindex` | `gpt-4o-2024-11-20` |
+| Anthropic | Code enrichment via Haiku | `ANTHROPIC_API_KEY` | `anthropic` | `claude-haiku-4-5-20251001` |
+
+Feature flags are computed properties that require both the API key AND the SDK to be installed:
+
+```python
+class RLMConfig:
+    @property
+    def doc_indexing_enabled(self) -> bool:
+        return self.openai_api_key is not None and self.pageindex_available
+
+    @property
+    def enrichment_enabled(self) -> bool:
+        return self.anthropic_api_key is not None and self.anthropic_available
+```
+
+The model can be overridden via `PAGEINDEX_MODEL` environment variable. Both providers support `.env` files via `python-dotenv`.
+
+### Document Indexing Pipeline
+
+When `rlm_doc_map` is called on a document file, the daemon routes through a fallback chain in `doc_indexer.py`:
+
+**1. PageIndex path** (when `CHATGPT_API_KEY` is set and `pageindex` is installed):
+
+For markdown files, calls `pageindex.page_index_md.md_to_tree()` with:
+- `md_path`: file path
+- `model`: configurable (default `gpt-4o-2024-11-20`)
+- `if_add_node_summary`: `"yes"` — generates 1-line semantic summaries per section
+- `if_add_node_id`: `"yes"` — assigns unique node identifiers
+
+For PDF files, calls `pageindex.page_index.page_index()` with the same parameters.
+
+Both are async functions wrapped with a manual event loop since the daemon is synchronous:
+
+```python
+loop = asyncio.new_event_loop()
+try:
+    result = loop.run_until_complete(md_to_tree(
+        md_path=file_path,
+        model=config.pageindex_model,
+        if_add_node_summary="yes",
+        if_add_node_id="yes",
+    ))
+finally:
+    loop.close()
+```
+
+**2. Local fallback** (when PageIndex is unavailable or fails):
+
+For markdown, a regex-based parser extracts headings (`^#{1,6}\s+`) while skipping headings inside code blocks. A stack algorithm builds the hierarchy:
+
+- Tracks heading levels to nest children under parents
+- Assigns line ranges (each section spans from its heading to the next heading)
+- No API calls — works entirely offline
+
+For plain text and RST files, a minimal indexer returns line count and a preview of the first 10 lines.
+
+**3. Error handling**: If PageIndex raises any exception (network error, rate limit, invalid response), the indexer silently falls through to the local path. The user always gets a result.
+
+### Unified Node Tree Format
+
+Both PageIndex and local indexing produce the same unified node schema, making downstream tools (MCP server, skill workflow) provider-agnostic:
+
+```json
+{
+  "name": "Installation",
+  "type": "section",
+  "source": "pageindex_md",
+  "summary": "Steps to install the project using pip and npm.",
+  "metadata": {
+    "node_id": "pi-abc-123",
+    "text_preview": "Run pip install -r requirements.txt..."
+  },
+  "range": { "start": 15, "end": 28 },
+  "children": [
+    {
+      "name": "Prerequisites",
+      "type": "section",
+      "source": "pageindex_md",
+      "summary": "Required Python and Node.js versions.",
+      "range": { "start": 20, "end": 25 },
+      "children": []
+    }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `name` | Section title (from heading or PageIndex) |
+| `type` | `"document"` (root) or `"section"` (child) |
+| `source` | `"pageindex_md"`, `"pageindex_pdf"`, `"local_md"`, or `"local_txt"` |
+| `summary` | LLM-generated 1-line summary (PageIndex only, `null` for local) |
+| `range` | 1-indexed line range `{start, end}` for surgical extraction |
+| `metadata` | PageIndex node IDs, text previews |
+| `children` | Recursive array of child sections |
+
+The `source` field lets consumers distinguish how the tree was built. When PageIndex is available, summaries provide semantic context that local parsing cannot — enabling richer navigation decisions.
+
+### Document Navigation Workflow
+
+The MCP tools mirror the code navigation workflow:
+
+```
+rlm_doc_map    →  See section hierarchy (like rlm_map for code)
+rlm_doc_drill  →  Read specific section (like rlm_drill for code)
+rlm_assess     →  Check if gathered context answers the query
+```
+
+`rlm_doc_drill` uses the line ranges from the unified tree to extract only the requested section's content — the same surgical read pattern used for code symbols. A recursive `_find_section()` helper does case-insensitive title matching through the tree.
+
+---
+
+## DSPy-Inspired Multi-Agent Navigation
+
+RLM Navigator's multi-agent system draws directly from [DSPy](https://github.com/stanfordnlp/dspy) (Stanford NLP) — a framework for compiling declarative language model calls into self-improving pipelines. While the production implementation uses raw prompt templates rather than the DSPy library itself, the architecture faithfully follows DSPy's Signature/Module design patterns.
+
+### From DSPy Research to Production
+
+The project's `research/` directory contains the original DSPy prototypes — three `dspy.Signature` classes and a `dspy.Module` that used `dspy.ChainOfThought()` for each agent:
+
+```python
+# Original DSPy prototype (research/Navigator Prompts.py)
+class ExplorerSignature(dspy.Signature):
+    """Policy network — proposes which code symbols to investigate."""
+    tree_skeleton = dspy.InputField(desc="AST skeleton of the codebase")
+    session_state = dspy.InputField(desc="Current MCTS session state")
+    selected_nodes = dspy.OutputField(desc="Ranked list of symbols to explore")
+
+class MultiAgentNavigator(dspy.Module):
+    def __init__(self):
+        self.explorer = dspy.ChainOfThought(ExplorerSignature)
+        self.validator = dspy.ChainOfThought(ValidatorSignature)
+        self.orchestrator = dspy.ChainOfThought(OrchestratorSignature)
+```
+
+The production implementation replaces `dspy.Signature` with prompt templates and `dspy.ChainOfThought` with structured JSON output parsing, but preserves the same three-agent architecture and input/output contracts.
+
+### The Triad Architecture
+
+The system uses an AlphaGo-inspired pattern: **Policy Network** (Explorer) + **Value Network** (Validator) + **Search Control** (Orchestrator), coordinated by MCTS session state.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   MCTS Navigation Loop                          │
+│                                                                 │
+│  1. EXPLORE        2. INVESTIGATE      3. VALIDATE              │
+│  ┌──────────┐      ┌──────────┐        ┌──────────┐            │
+│  │ Explorer │─────>│ Squeezer │───────>│ Validator│            │
+│  │ (Policy) │      │ (Drill)  │        │ (Value)  │            │
+│  └────┬─────┘      └──────────┘        └────┬─────┘            │
+│       │ proposes                             │ critiques        │
+│       │ nodes                                │ relevance        │
+│       │                                      │                  │
+│  ┌────▼──────────────────────────────────────▼─────┐           │
+│  │              Orchestrator (Control)              │           │
+│  │  • Reads session state (visited, blacklist)      │           │
+│  │  • Decides: drill / answer / backtrack           │           │
+│  │  • Updates blacklist on irrelevant branches      │           │
+│  │  • Forces answer at max depth                    │           │
+│  └────┬────────────────────────────────────────────┘           │
+│       │                                                         │
+│  ┌────▼────────────────────┐                                   │
+│  │   MCTSSession State     │                                   │
+│  │  • visited: [nodes...]  │                                   │
+│  │  • blacklist: {nodes}   │                                   │
+│  │  • scores: {node: 0.9}  │                                   │
+│  │  • context_accumulated  │                                   │
+│  │  • depth / max_depth    │                                   │
+│  └─────────────────────────┘                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Agent Details
+
+**Explorer** (`daemon/agents/explorer.py`) — the Policy Network:
+- Receives: AST skeleton + session state (visited nodes, blacklist, current depth)
+- Produces: 1-3 ranked node proposals with relevance scores (0.0-1.0) and reasons
+- Filters: never proposes blacklisted or already-visited nodes
+- Actions: `drill` (investigate symbol), `map` (get skeleton), `answer` (sufficient context), `pivot` (change strategy)
+
+```json
+{
+  "selected_nodes": [
+    {"path": "auth.py", "symbol": "AuthManager", "score": 0.95, "reason": "Handles authentication"}
+  ],
+  "action": "drill"
+}
+```
+
+**Validator** (`daemon/agents/validator.py`) — the Value Network:
+- Receives: user query + symbol path + drilled code snippet
+- Produces: relevance verdict (`is_valid`), confidence score, critique, and dependency list
+- The `dependencies` field enables cascading exploration — if validating `AuthManager` reveals it depends on `TokenStore`, the Orchestrator can queue that for investigation
+
+```json
+{
+  "is_valid": true,
+  "confidence": 0.9,
+  "critique": "Directly implements the authentication flow.",
+  "dependencies": ["token.py::TokenStore"]
+}
+```
+
+**Orchestrator** (`daemon/agents/orchestrator.py`) — the Search Controller:
+- Receives: user query + full session state + last validation result
+- Decision logic:
+  - `is_valid=true` → accumulate context, check if sufficient to answer
+  - `is_valid=false` → blacklist the branch, propose alternative via Explorer
+  - `depth >= max_depth` → force answer with accumulated context
+  - All branches exhausted → answer with best available context
+- Produces: next action, target node, reasoning, and optional blacklist entry
+
+```json
+{
+  "next_action": "drill",
+  "target_node": "token.py::TokenStore",
+  "reasoning": "Need to understand token storage to complete auth picture.",
+  "should_blacklist": null
+}
+```
+
+### MCTS Session State
+
+`daemon/mcts.py` manages navigation sessions with thread-safe state:
+
+- **`MCTSSession`**: Per-query state container with UUID. Tracks `visited` (ordered exploration history), `blacklist` (rejected branches), `scores` (relevance per node), and `context_accumulated` (gathered code snippets). The `at_max_depth` property triggers forced answer generation.
+
+- **`MCTSSessionManager`**: Thread-safe registry of concurrent sessions. Creates, retrieves, and cleans up sessions with a `threading.Lock()` for safe concurrent access.
+
+The session state is serialized to JSON and injected into every agent prompt, giving each agent full visibility into the search history. This prevents circular exploration — the Explorer won't propose nodes that are already visited or blacklisted.
+
+### Node Enrichment (Haiku API)
+
+`daemon/node_enricher.py` adds semantic annotations to AST skeletons, improving Explorer's proposal quality:
+
+1. **`parse_skeleton_symbols()`** extracts symbol definitions from skeleton text via regex
+2. **`build_enrichment_prompt()`** batches symbols and asks Haiku for 1-line summaries
+3. **`EnrichmentCache`** stores results keyed by `(file_path, mtime)` — invalidates when files change
+4. **`merge_enrichments()`** annotates skeleton lines with summaries:
+   ```
+   def validate_token(self, token: str) -> bool:  # L25-30  # Checks if token starts with 'sk-' prefix.
+   ```
+5. **`EnrichmentWorker`** processes the queue in a background daemon thread, enriching files asynchronously without blocking navigation
+
+The enrichment pipeline is entirely optional (requires `ANTHROPIC_API_KEY`). When available, it transforms raw signatures into semantically meaningful descriptions that help the Explorer make better-informed navigation proposals.
+
+### Why Not DSPy Directly?
+
+The research phase prototyped with DSPy's `dspy.ChainOfThought()` modules. The production implementation moved to raw prompt templates for three reasons:
+
+1. **Dependency minimization**: DSPy pulls in a significant dependency tree. The prompt-based approach requires only the `anthropic` SDK (already needed for enrichment).
+2. **Transparency**: Raw prompts make the agent behavior fully inspectable and debuggable. Each agent's exact prompt template lives in a single file.
+3. **Architecture preservation**: The core insight from DSPy — structured Signatures with typed input/output fields coordinated by a Module — translates directly to prompt templates with JSON schemas. The Triad architecture, session state management, and backtracking logic are all preserved.
+
+All three agents use identical JSON parsing with graceful fallback:
+
+```python
+def parse_output(raw: str) -> Optional[dict]:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    return json.loads(text)
+```
+
+This handles both raw JSON and markdown-wrapped responses, with `None` return on parse failure rather than exceptions.
+
+---
+
 ## Manual Testing & Demonstration Guide
 
 This section provides a comprehensive walkthrough for manually verifying RLM Navigator's functionality and demonstrating its token-saving capabilities. Each test builds on the previous one, following the core navigation workflow.
