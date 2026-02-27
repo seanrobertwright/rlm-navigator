@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  daemon-tests:
+    name: Python Daemon Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-timeout
+          pip install watchdog tree-sitter tree-sitter-python tree-sitter-javascript tree-sitter-typescript
+
+      - name: Run unit tests
+        run: cd daemon && python -m pytest tests/ -m "not e2e" -v --timeout=30
+
+      - name: Run E2E tests
+        run: cd daemon && python -m pytest tests/ -m "e2e" -v --timeout=60
+
+  server-tests:
+    name: TypeScript MCP Server Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python (for E2E daemon)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python dependencies (for E2E)
+        run: |
+          pip install watchdog tree-sitter tree-sitter-python tree-sitter-javascript tree-sitter-typescript
+
+      - name: Install npm dependencies
+        run: cd server && npm ci
+
+      - name: Build
+        run: cd server && npm run build
+
+      - name: Run tests
+        run: cd server && npm test
