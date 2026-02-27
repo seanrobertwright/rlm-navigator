@@ -15,16 +15,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 # ---------------------------------------------------------------------------
-# Pytest markers
-# ---------------------------------------------------------------------------
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "e2e: end-to-end tests (may be slow)")
-    config.addinivalue_line("markers", "integration: integration tests")
-    config.addinivalue_line("markers", "requires_api: tests requiring real API keys")
-
-
-# ---------------------------------------------------------------------------
 # TCP helpers
 # ---------------------------------------------------------------------------
 

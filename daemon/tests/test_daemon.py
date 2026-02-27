@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import socket
 import sys
 import tempfile
@@ -15,6 +16,39 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rlm_daemon import SkeletonCache, build_tree, handle_request, run_server
+
+
+def _get_free_port() -> int:
+    """Get a random free port in the test range."""
+    base = 19200 + random.randint(0, 500)
+    for port in range(base, base + 20):
+        try:
+            s = socket.socket()
+            s.bind(("127.0.0.1", port))
+            s.close()
+            return port
+        except OSError:
+            continue
+    raise RuntimeError("No free port found in test range")
+
+
+def _tcp_query(port: int, request: dict, timeout: float = 5.0) -> dict:
+    """Send a JSON request to the daemon and return parsed response."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect(("127.0.0.1", port))
+    s.sendall(json.dumps(request).encode())
+    data = b""
+    while True:
+        try:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        except socket.timeout:
+            break
+    s.close()
+    return json.loads(data.decode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -193,58 +227,64 @@ class TestHandleRequest:
 
 class TestTCPServer:
     def test_health_check(self, tmp_path):
-        """Start daemon, check health via TCP, then shut down."""
-        port = 19177  # Use non-standard port for tests
-
+        """Start daemon, check health via bare TCP connection, then shut down."""
+        port = _get_free_port()
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
         (tmp_path / "test.py").write_text("def foo(): pass\n")
 
-        # Start server in background thread
         server_thread = threading.Thread(
             target=run_server,
-            args=(str(tmp_path), port),
+            args=(str(tmp_path), port, 0),
             daemon=True,
         )
         server_thread.start()
-        time.sleep(1)  # Wait for server to start
 
-        # Health check — bare connection should get ALIVE
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(3)
-            s.connect(("127.0.0.1", port))
-            s.settimeout(3)
-            data = s.recv(1024)
-            s.close()
-            assert b"ALIVE" in data
-        except Exception as e:
-            pytest.skip(f"TCP test failed (port may be in use): {e}")
+        # Wait for port file (confirms server is listening)
+        for _ in range(50):
+            if (rlm_dir / "port").exists():
+                break
+            time.sleep(0.1)
+        assert (rlm_dir / "port").exists(), "Daemon failed to start"
+
+        # Health check — close send side so daemon recv() returns empty → ALIVE
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(5)
+        s.connect(("127.0.0.1", port))
+        s.shutdown(socket.SHUT_WR)
+        data = s.recv(1024)
+        s.close()
+        assert b"ALIVE" in data
+
+        # Clean shutdown
+        _tcp_query(port, {"action": "shutdown"}, timeout=2)
 
     def test_json_query(self, tmp_path):
         """Start daemon, send a JSON query, verify response."""
-        port = 19178
-
+        port = _get_free_port()
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
         (tmp_path / "test.py").write_text("def foo():\n    pass\n")
 
         server_thread = threading.Thread(
             target=run_server,
-            args=(str(tmp_path), port),
+            args=(str(tmp_path), port, 0),
             daemon=True,
         )
         server_thread.start()
-        time.sleep(1)
 
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(3)
-            s.connect(("127.0.0.1", port))
-            s.send(json.dumps({"action": "status"}).encode())
-            s.settimeout(3)
-            data = s.recv(4096)
-            s.close()
-            resp = json.loads(data)
-            assert resp["status"] == "alive"
-        except Exception as e:
-            pytest.skip(f"TCP test failed (port may be in use): {e}")
+        # Wait for port file
+        for _ in range(50):
+            if (rlm_dir / "port").exists():
+                break
+            time.sleep(0.1)
+        assert (rlm_dir / "port").exists(), "Daemon failed to start"
+
+        resp = _tcp_query(port, {"action": "status"})
+        assert resp["status"] == "alive"
+
+        # Clean shutdown
+        _tcp_query(port, {"action": "shutdown"}, timeout=2)
 
 
 # ---------------------------------------------------------------------------
