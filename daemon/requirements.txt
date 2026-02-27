@@ -8,3 +8,9 @@ tree-sitter-rust>=0.23
 tree-sitter-java>=0.23
 tree-sitter-c>=0.23
 tree-sitter-cpp>=0.23
+# Optional: Document indexing (requires CHATGPT_API_KEY)
+# pageindex
+# Optional: Code enrichment + agents (requires ANTHROPIC_API_KEY)
+# anthropic>=0.40
+# Optional: .env file support
+# python-dotenv>=1.0
