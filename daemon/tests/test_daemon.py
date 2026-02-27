@@ -386,3 +386,84 @@ class TestDaemonLifecycle:
 
         with pytest.raises(SystemExit):
             run_server(str(tmp_path), 19180, idle_timeout=0)
+
+
+# ---------------------------------------------------------------------------
+# Document indexing integration tests
+# ---------------------------------------------------------------------------
+
+class TestDocumentIndexing:
+    def test_doc_map_action_markdown(self, tmp_path):
+        """doc_map action should return document tree for markdown files."""
+        md_file = tmp_path / "README.md"
+        md_file.write_text("# Project\n\nOverview.\n\n## Install\n\nRun npm install.\n")
+
+        cache = SkeletonCache()
+        data = json.dumps({"action": "doc_map", "path": "README.md"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+
+        assert "error" not in resp
+        assert "tree" in resp
+        assert resp["tree"]["name"] == "README.md"
+        assert resp["tree"]["type"] == "document"
+        assert len(resp["tree"]["children"]) >= 1
+
+    def test_doc_map_action_nonexistent(self, tmp_path):
+        """doc_map for missing file should return error."""
+        cache = SkeletonCache()
+        data = json.dumps({"action": "doc_map", "path": "missing.md"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+        assert "error" in resp
+
+    def test_squeeze_returns_skeleton_for_markdown(self, tmp_path):
+        """squeeze action on .md should return a document skeleton."""
+        md_file = tmp_path / "README.md"
+        md_file.write_text("# Title\n\nSome text.\n\n## Section\n\nMore text.\n")
+
+        cache = SkeletonCache()
+        data = json.dumps({"action": "squeeze", "path": "README.md"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+
+        assert "skeleton" in resp
+        assert "Title" in resp["skeleton"]
+
+    def test_search_includes_document_files(self, tmp_path):
+        """search should find headings in document files."""
+        md_file = tmp_path / "README.md"
+        md_file.write_text("# Installation Guide\n\nFollow these steps.\n")
+
+        cache = SkeletonCache()
+        # First, trigger caching
+        data = json.dumps({"action": "squeeze", "path": "README.md"}).encode()
+        handle_request(data, cache, str(tmp_path))
+
+        data = json.dumps({"action": "search", "query": "Installation"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+        assert "results" in resp
+
+    def test_doc_map_rejects_non_document(self, tmp_path):
+        """doc_map should reject code files."""
+        py_file = tmp_path / "main.py"
+        py_file.write_text("def hello(): pass\n")
+
+        cache = SkeletonCache()
+        data = json.dumps({"action": "doc_map", "path": "main.py"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+        assert "error" in resp
+
+
+# ---------------------------------------------------------------------------
+# Enrichment integration tests
+# ---------------------------------------------------------------------------
+
+class TestEnrichmentIntegration:
+    def test_status_reports_enrichment_state(self, tmp_path):
+        """Status should report whether enrichment is available."""
+        cache = SkeletonCache()
+        data = json.dumps({"action": "status"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+
+        assert "enrichment_available" in resp
+        assert isinstance(resp["enrichment_available"], bool)
+        assert "doc_indexing_available" in resp
+        assert isinstance(resp["doc_indexing_available"], bool)

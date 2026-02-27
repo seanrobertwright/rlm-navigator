@@ -297,6 +297,14 @@ def squeeze(file_path: str) -> str:
     if not path.exists():
         return f"Error: file not found: {file_path}"
 
+    # Check for document files — use doc_indexer for structured skeletons
+    from doc_indexer import is_document_file, index_markdown_local
+    if is_document_file(file_path):
+        tree = index_markdown_local(file_path)
+        if tree:
+            return _format_doc_skeleton(tree)
+        return _fallback_squeeze(path)
+
     lang_name = _detect_language(file_path)
     if lang_name is None:
         return _fallback_squeeze(path)
@@ -412,3 +420,31 @@ def _fallback_squeeze(path: Path) -> str:
 def _count_lines(source: bytes) -> int:
     """Count lines in source bytes."""
     return source.count(b"\n") + (1 if source and not source.endswith(b"\n") else 0)
+
+
+def _format_doc_skeleton(tree: dict) -> str:
+    """Format a document tree as a skeleton string for display."""
+    filename = tree["name"]
+    sections = _count_sections(tree)
+    lines = [f"# {filename} — {sections} sections (document)"]
+
+    def _walk(node, depth=0):
+        for child in node.get("children", []):
+            indent = "  " * depth
+            range_str = ""
+            if "range" in child and child["range"]:
+                r = child["range"]
+                range_str = f"  # L{r['start']}-{r['end']}"
+            lines.append(f"{indent}{child['name']}{range_str}")
+            _walk(child, depth + 1)
+
+    _walk(tree)
+    return "\n".join(lines)
+
+
+def _count_sections(tree: dict) -> int:
+    """Count total sections in a document tree."""
+    count = 0
+    for child in tree.get("children", []):
+        count += 1 + _count_sections(child)
+    return count

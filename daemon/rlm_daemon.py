@@ -464,10 +464,12 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
     if not base.exists():
         return results
 
+    from doc_indexer import is_document_file
+
     for item in base.rglob("*"):
         if item.is_dir() or any(part in IGNORED_DIRS for part in item.parts):
             continue
-        if _detect_language(str(item)) is None:
+        if _detect_language(str(item)) is None and not is_document_file(str(item)):
             continue
 
         skeleton = cache.get(str(item))
@@ -595,11 +597,15 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
         return response
 
     elif action == "status":
+        from config import RLMConfig
+        cfg = RLMConfig()
         resp = {
             "status": "alive",
             "root": root,
             "cache_size": cache.size,
             "languages": supported_languages(),
+            "enrichment_available": cfg.enrichment_enabled,
+            "doc_indexing_available": cfg.doc_indexing_enabled,
         }
         if stats:
             resp["session"] = stats.to_dict()
@@ -686,6 +692,29 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
             except OSError:
                 full_size = len(response)
             stats.record("chunks_read", len(response), max(0, full_size - len(content.encode("utf-8"))))
+        return response
+
+    elif action == "doc_map":
+        rel = req.get("path", "")
+        abs_path = str((root_path / rel).resolve())
+        if not abs_path.startswith(str(root_path)):
+            return json.dumps({"error": "Path outside project root"}).encode("utf-8")
+        if not Path(abs_path).exists():
+            return json.dumps({"error": f"File not found: {rel}"}).encode("utf-8")
+
+        from doc_indexer import is_document_file, index_document
+        from config import RLMConfig
+        if not is_document_file(abs_path):
+            return json.dumps({"error": f"Not a document file: {rel}"}).encode("utf-8")
+
+        cfg = RLMConfig()
+        tree = index_document(abs_path, cfg)
+        if tree is None:
+            return json.dumps({"error": f"Failed to index: {rel}"}).encode("utf-8")
+
+        response = json.dumps({"tree": tree}).encode("utf-8")
+        if stats:
+            stats.record("doc_map", len(response))
         return response
 
     elif action == "shutdown":

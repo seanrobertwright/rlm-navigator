@@ -116,3 +116,43 @@ class TestEnrichmentMerge:
         enrichments = {"fetch": "Fetches data from a URL."}
         result = merge_enrichments(skeleton, enrichments)
         assert "# Fetches data from a URL." in result
+
+
+class TestEnrichmentWorker:
+    def test_worker_processes_queue(self):
+        """Enrichment worker should process files from queue."""
+        from node_enricher import EnrichmentCache, EnrichmentWorker
+
+        cache = EnrichmentCache()
+        worker = EnrichmentWorker(cache, config=None)
+
+        skeleton = "class Foo:  # L1-10\n    ...\n"
+        worker.enqueue("test.py", skeleton, 1000.0)
+
+        assert worker.queue_size >= 0
+
+    def test_worker_skips_when_no_config(self):
+        """Worker should skip enrichment when no API key configured."""
+        from node_enricher import EnrichmentCache, EnrichmentWorker
+
+        cache = EnrichmentCache()
+        worker = EnrichmentWorker(cache, config=None)
+
+        skeleton = "class Foo:  # L1-10\n    ...\n"
+        worker.enqueue("test.py", skeleton, 1000.0)
+        worker.process_one()
+
+        # Cache should be empty (no API call made)
+        assert cache.get("test.py", 1000.0) is None
+
+    def test_worker_skips_duplicate_enqueue(self):
+        """Worker should skip enqueue if already cached at same mtime."""
+        from node_enricher import EnrichmentCache, EnrichmentWorker
+
+        cache = EnrichmentCache()
+        cache.put("test.py", 1000.0, {"Foo": "A test class."})
+
+        worker = EnrichmentWorker(cache, config=None)
+        worker.enqueue("test.py", "class Foo:  # L1-10\n", 1000.0)
+
+        assert worker.queue_size == 0

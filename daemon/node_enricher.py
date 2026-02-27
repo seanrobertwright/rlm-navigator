@@ -4,6 +4,7 @@ Parses skeleton output from squeezer.py, batches symbols, calls Haiku for 1-line
 summaries, caches results by file path + mtime.
 """
 
+import queue
 import re
 import json
 import threading
@@ -147,3 +148,74 @@ async def enrich_file(file_path: str, skeleton: str, config) -> Optional[dict]:
         return json.loads(text)
     except Exception:
         return None
+
+
+class EnrichmentWorker:
+    """Background worker that processes files for enrichment."""
+
+    def __init__(self, cache: EnrichmentCache, config=None):
+        self._cache = cache
+        self._config = config
+        self._queue: queue.Queue = queue.Queue()
+        self._running = False
+
+    def enqueue(self, file_path: str, skeleton: str, mtime: float) -> None:
+        """Add a file to the enrichment queue."""
+        if self._cache.get(file_path, mtime) is not None:
+            return
+        self._queue.put((file_path, skeleton, mtime))
+
+    @property
+    def queue_size(self) -> int:
+        return self._queue.qsize()
+
+    def process_one(self) -> bool:
+        """Process one item from the queue. Returns True if an item was processed."""
+        try:
+            file_path, skeleton, mtime = self._queue.get_nowait()
+        except queue.Empty:
+            return False
+
+        if not self._config or not getattr(self._config, 'enrichment_enabled', False):
+            return True
+
+        symbols = parse_skeleton_symbols(skeleton)
+        if not symbols:
+            return True
+
+        prompt = build_enrichment_prompt(file_path, symbols)
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=self._config.anthropic_api_key)
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+            enrichments = json.loads(text)
+            self._cache.put(file_path, mtime, enrichments)
+        except Exception:
+            pass  # Enrichment is best-effort
+
+        return True
+
+    def start(self) -> None:
+        """Start the background worker thread."""
+        if self._running:
+            return
+        self._running = True
+        t = threading.Thread(target=self._run_loop, daemon=True)
+        t.start()
+
+    def _run_loop(self) -> None:
+        import time
+        while self._running:
+            if not self.process_one():
+                time.sleep(1)
+
+    def stop(self) -> None:
+        self._running = False
