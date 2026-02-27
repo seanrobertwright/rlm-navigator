@@ -602,6 +602,97 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Document Navigation Tools
+// ---------------------------------------------------------------------------
+
+// --- rlm_doc_map ---
+server.tool(
+  "rlm_doc_map",
+  "Get hierarchical outline of a document file (.md, .pdf, .txt, .rst). Returns section tree with titles and line ranges.",
+  {
+    path: z.string().describe("Document file path relative to project root"),
+  },
+  async ({ path: filePath }) => {
+    try {
+      const result = await queryDaemonWithRetry({ action: "doc_map", path: filePath });
+      if (result.error) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+      const treeText = JSON.stringify(result.tree, null, 2);
+      return {
+        content: [{ type: "text" as const, text: truncateResponse(treeText) + formatStats(result) }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// --- rlm_doc_drill ---
+server.tool(
+  "rlm_doc_drill",
+  "Extract a specific section from a document file by section title. Use rlm_doc_map first to see available sections.",
+  {
+    path: z.string().describe("Document file path relative to project root"),
+    section: z.string().describe("Section title to extract (from rlm_doc_map output)"),
+  },
+  async ({ path: filePath, section }) => {
+    try {
+      const result = await queryDaemonWithRetry({ action: "doc_drill", path: filePath, section });
+      if (result.error) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: truncateResponse(result.content) + formatStats(result) }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// --- rlm_assess ---
+server.tool(
+  "rlm_assess",
+  "Assess whether accumulated context is sufficient to answer a query. Call after gathering code/doc snippets to decide whether to continue navigating or synthesize an answer.",
+  {
+    query: z.string().describe("The original user question"),
+    context_summary: z.string().describe("Brief summary of what has been found so far"),
+  },
+  async ({ query, context_summary }) => {
+    try {
+      const result = await queryDaemonWithRetry({ action: "assess", query, context_summary });
+      if (result.error) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: "text" as const, text: result.assessment + formatStats(result) }],
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Chunk Tools
 // ---------------------------------------------------------------------------
 

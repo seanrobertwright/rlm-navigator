@@ -456,6 +456,54 @@ class TestDocumentIndexing:
 # Enrichment integration tests
 # ---------------------------------------------------------------------------
 
+class TestDocDrill:
+    def test_doc_drill_extracts_section(self, tmp_path):
+        """doc_drill should return content for a specific section."""
+        md_file = tmp_path / "guide.md"
+        md_file.write_text("# Guide\n\nIntro text.\n\n## Installation\n\nRun npm install.\n\n## Usage\n\nImport the module.\n")
+
+        cache = SkeletonCache()
+        data = json.dumps({"action": "doc_drill", "path": "guide.md", "section": "Installation"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+
+        assert "error" not in resp
+        assert "content" in resp
+        assert "npm install" in resp["content"]
+
+    def test_doc_drill_missing_section(self, tmp_path):
+        """doc_drill for nonexistent section should return error."""
+        md_file = tmp_path / "guide.md"
+        md_file.write_text("# Guide\n\n## Installation\n\nContent.\n")
+
+        cache = SkeletonCache()
+        data = json.dumps({"action": "doc_drill", "path": "guide.md", "section": "Nonexistent"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+        assert "error" in resp
+
+    def test_doc_drill_missing_file(self, tmp_path):
+        """doc_drill for missing file should return error."""
+        cache = SkeletonCache()
+        data = json.dumps({"action": "doc_drill", "path": "missing.md", "section": "Foo"}).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+        assert "error" in resp
+
+
+class TestAssessAction:
+    def test_assess_returns_assessment(self, tmp_path):
+        """assess action should return an assessment string."""
+        cache = SkeletonCache()
+        data = json.dumps({
+            "action": "assess",
+            "query": "How does auth work?",
+            "context_summary": "Found validate_token in auth.py"
+        }).encode()
+        resp = json.loads(handle_request(data, cache, str(tmp_path)))
+
+        assert "error" not in resp
+        assert "assessment" in resp
+        assert "auth" in resp["assessment"].lower()
+
+
 class TestEnrichmentIntegration:
     def test_status_reports_enrichment_state(self, tmp_path):
         """Status should report whether enrichment is available."""

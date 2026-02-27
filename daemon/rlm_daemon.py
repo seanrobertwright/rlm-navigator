@@ -492,6 +492,17 @@ def search_symbols(cache: SkeletonCache, root: str, query: str, dir_path: str) -
     return results
 
 
+def _find_section(node: dict, title: str) -> Optional[dict]:
+    """Recursively find a section node by title (case-insensitive)."""
+    if node.get("name", "").lower() == title.lower():
+        return node
+    for child in node.get("children", []):
+        found = _find_section(child, title)
+        if found:
+            return found
+    return None
+
+
 def handle_request(data: bytes, cache: SkeletonCache, root: str, repl: RLMRepl = None, stats: SessionStats = None, chunk_store: ChunkStore = None, shutdown_event: threading.Event = None) -> bytes:
     """Process a JSON request and return a JSON response."""
     response = _handle_request_inner(data, cache, root, repl, stats, chunk_store, shutdown_event)
@@ -715,6 +726,56 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
         response = json.dumps({"tree": tree}).encode("utf-8")
         if stats:
             stats.record("doc_map", len(response))
+        return response
+
+    elif action == "doc_drill":
+        rel = req.get("path", "")
+        section = req.get("section", "")
+        abs_path = str((root_path / rel).resolve())
+        if not abs_path.startswith(str(root_path)):
+            return json.dumps({"error": "Path outside project root"}).encode("utf-8")
+        if not Path(abs_path).exists():
+            return json.dumps({"error": f"File not found: {rel}"}).encode("utf-8")
+
+        from doc_indexer import index_document
+        from config import RLMConfig
+        cfg = RLMConfig()
+        tree = index_document(abs_path, cfg)
+        if not tree:
+            return json.dumps({"error": "Failed to index document"}).encode("utf-8")
+
+        node = _find_section(tree, section)
+        if not node:
+            return json.dumps({"error": f"Section not found: {section}"}).encode("utf-8")
+
+        r = node.get("range")
+        if r:
+            lines = Path(abs_path).read_text(encoding="utf-8", errors="replace").split("\n")
+            content = "\n".join(lines[r["start"]-1:r["end"]])
+        else:
+            content = f"[Section '{section}' found but no line range available]"
+
+        response = json.dumps({"content": content}).encode("utf-8")
+        if stats:
+            try:
+                full_size = os.path.getsize(abs_path)
+            except OSError:
+                full_size = len(response)
+            stats.record("doc_drill", len(response), max(0, full_size - len(content.encode("utf-8"))))
+        return response
+
+    elif action == "assess":
+        query = req.get("query", "")
+        context_summary = req.get("context_summary", "")
+        assessment = (
+            f"Query: {query}\n"
+            f"Context gathered: {context_summary}\n\n"
+            f"Assessment: Review the context above. If it directly addresses the query, "
+            f"synthesize your answer. If gaps remain, continue navigating."
+        )
+        response = json.dumps({"assessment": assessment}).encode("utf-8")
+        if stats:
+            stats.record("assess", len(response))
         return response
 
     elif action == "shutdown":
