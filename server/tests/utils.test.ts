@@ -12,6 +12,7 @@ import {
   formatTree,
   readLines,
   getDaemonPort,
+  formatProgressMessage,
 } from "../src/utils.js";
 
 // ---------------------------------------------------------------------------
@@ -214,5 +215,84 @@ describe("getDaemonPort", () => {
   test("respects env var override", () => {
     const port = getDaemonPort("/dummy", "19500");
     expect(port).toBe(19500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatProgressMessage
+// ---------------------------------------------------------------------------
+
+describe("formatProgressMessage", () => {
+  test("chunking_start with query", () => {
+    const msg = formatProgressMessage("chunking_start", { file: "main.py", query: "auth flow" });
+    expect(msg).toBe("[RLM] Chunking main.py for: auth flow...");
+  });
+
+  test("chunking_start without query", () => {
+    const msg = formatProgressMessage("chunking_start", { file: "main.py" });
+    expect(msg).toBe("[RLM] Chunking main.py...");
+  });
+
+  test("chunking_complete", () => {
+    const msg = formatProgressMessage("chunking_complete", { file: "main.py", total_chunks: 7 });
+    expect(msg).toBe("[RLM] main.py split into 7 chunks");
+  });
+
+  test("chunk_dispatch with chunk info", () => {
+    const msg = formatProgressMessage("chunk_dispatch", {
+      file: "main.py", agent: "rlm-subcall", chunk: 2, total_chunks: 7
+    });
+    expect(msg).toBe("[RLM] Dispatching chunk 3/7 of main.py to rlm-subcall...");
+  });
+
+  test("chunk_dispatch for enrichment", () => {
+    const msg = formatProgressMessage("chunk_dispatch", {
+      file: "main.py", agent: "rlm-enricher"
+    });
+    expect(msg).toBe("[RLM] Dispatching main.py to rlm-enricher...");
+  });
+
+  test("chunk_complete with count", () => {
+    const msg = formatProgressMessage("chunk_complete", {
+      chunk: 2, total_chunks: 7, count: 3
+    });
+    expect(msg).toBe("[RLM] chunk 3/7 complete — 3 relevant symbols found");
+  });
+
+  test("chunk_complete with summary", () => {
+    const msg = formatProgressMessage("chunk_complete", {
+      chunk: 0, total_chunks: 1, count: 2, summary: "found auth handler"
+    });
+    expect(msg).toBe("[RLM] chunk 1/1 complete — 2 relevant symbols found — found auth handler");
+  });
+
+  test("queries_suggested", () => {
+    const msg = formatProgressMessage("queries_suggested", { count: 5 });
+    expect(msg).toBe("[RLM] 5 follow-up queries suggested");
+  });
+
+  test("answer_found with summary", () => {
+    const msg = formatProgressMessage("answer_found", { summary: "JWT validation in middleware" });
+    expect(msg).toBe("[RLM] Answer found: JWT validation in middleware");
+  });
+
+  test("answer_found without summary", () => {
+    const msg = formatProgressMessage("answer_found", {});
+    expect(msg).toBe("[RLM] Answer found");
+  });
+
+  test("synthesis_start", () => {
+    const msg = formatProgressMessage("synthesis_start", { count: 12 });
+    expect(msg).toBe("[RLM] Synthesis starting — analyzing 12 findings");
+  });
+
+  test("synthesis_complete", () => {
+    const msg = formatProgressMessage("synthesis_complete", { summary: "3 key patterns identified" });
+    expect(msg).toBe("[RLM] Synthesis complete: 3 key patterns identified");
+  });
+
+  test("unknown event fallback", () => {
+    const msg = formatProgressMessage("custom_event", {});
+    expect(msg).toBe("[RLM] custom_event");
   });
 });
