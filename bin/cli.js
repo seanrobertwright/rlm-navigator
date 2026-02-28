@@ -18,18 +18,18 @@ const PKG_ROOT = path.resolve(__dirname, "..");
 // ---------------------------------------------------------------------------
 
 const BANNER = `
-  ${chalk.cyan("╔═══════════════════════════════════════════╗")}
-  ${chalk.cyan("║")}                                           ${chalk.cyan("║")}
-  ${chalk.cyan("║")}   ${chalk.bold.cyan("██████╗ ██╗     ███╗   ███╗")}             ${chalk.cyan("║")}
-  ${chalk.cyan("║")}   ${chalk.bold.cyan("██╔══██╗██║     ████╗ ████║")}             ${chalk.cyan("║")}
-  ${chalk.cyan("║")}   ${chalk.bold.cyan("██████╔╝██║     ██╔████╔██║")}             ${chalk.cyan("║")}
-  ${chalk.cyan("║")}   ${chalk.bold.cyan("██╔══██╗██║     ██║╚██╔╝██║")}             ${chalk.cyan("║")}
-  ${chalk.cyan("║")}   ${chalk.bold.cyan("██║  ██║███████╗██║ ╚═╝ ██║")}             ${chalk.cyan("║")}
-  ${chalk.cyan("║")}   ${chalk.bold.cyan("╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝")}             ${chalk.cyan("║")}
-  ${chalk.cyan("║")}          ${chalk.bold.white("N A V I G A T O R")}                ${chalk.cyan("║")}
-  ${chalk.cyan("║")}   ${chalk.dim("Token-efficient codebase navigation")}     ${chalk.cyan("║")}
-  ${chalk.cyan("║")}                                           ${chalk.cyan("║")}
-  ${chalk.cyan("╚═══════════════════════════════════════════╝")}
+  ${chalk.cyan("╔═══════════════════════════════════════════════════╗")}
+  ${chalk.cyan("║")}                                                   ${chalk.cyan("║")}
+  ${chalk.cyan("║")}   ${chalk.bold.cyan("██████╗ ██╗     ███╗   ███╗")}       ${chalk.yellow("▲")}             ${chalk.cyan("║")}
+  ${chalk.cyan("║")}   ${chalk.bold.cyan("██╔══██╗██║     ████╗ ████║")}       ${chalk.yellow("N")}             ${chalk.cyan("║")}
+  ${chalk.cyan("║")}   ${chalk.bold.cyan("██████╔╝██║     ██╔████╔██║")}   ${chalk.yellow("◄W──◆──E►")}         ${chalk.cyan("║")}
+  ${chalk.cyan("║")}   ${chalk.bold.cyan("██╔══██╗██║     ██║╚██╔╝██║")}       ${chalk.yellow("S")}             ${chalk.cyan("║")}
+  ${chalk.cyan("║")}   ${chalk.bold.cyan("██║  ██║███████╗██║ ╚═╝ ██║")}       ${chalk.yellow("▼")}             ${chalk.cyan("║")}
+  ${chalk.cyan("║")}   ${chalk.bold.cyan("╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝")}                     ${chalk.cyan("║")}
+  ${chalk.cyan("║")}          ${chalk.bold.white("N A V I G A T O R")}                        ${chalk.cyan("║")}
+  ${chalk.cyan("║")}   ${chalk.dim("Token-efficient codebase navigation")}             ${chalk.cyan("║")}
+  ${chalk.cyan("║")}                                                   ${chalk.cyan("║")}
+  ${chalk.cyan("╚═══════════════════════════════════════════════════╝")}
 `;
 
 function banner() {
