@@ -105,6 +105,23 @@ class RLMRepl:
                 f"{start + i:4d} | {line}" for i, line in enumerate(selected)
             )
 
+        _GREP_SKIP_DIRS = {
+            ".git", "node_modules", "__pycache__", ".venv", "venv",
+            "dist", "build", ".next", ".nuxt", "target",
+            ".idea", ".vscode", "coverage", ".tox", ".mypy_cache", ".rlm",
+        }
+        _GREP_MAX_FILES = 5000
+        _GREP_TIME_LIMIT = 25  # seconds
+
+        def _is_binary(fpath: str) -> bool:
+            """Check if file is binary by looking for null bytes in first 512 bytes."""
+            try:
+                with open(fpath, "rb") as f:
+                    chunk = f.read(512)
+                return b"\x00" in chunk
+            except OSError:
+                return True
+
         def grep(pattern: str, path: str = ".", max_results: int = 50) -> str:
             """Regex search across files, return file:line:content."""
             search_root = os.path.join(root, path)
@@ -116,14 +133,29 @@ class RLMRepl:
                 return f"Error: invalid regex: {e}"
             tracker = _get_tracker()
             results = []
+            files_scanned = 0
+            start_time = time.time()
+            truncated_reason = None
             for dirpath, dirnames, filenames in os.walk(search_root):
                 # Skip ignored directories
                 dirnames[:] = [
                     d for d in dirnames
-                    if d not in {".git", "node_modules", "__pycache__", ".venv", "venv"}
+                    if d not in _GREP_SKIP_DIRS
                 ]
                 for fname in filenames:
+                    # Check time limit
+                    if time.time() - start_time > _GREP_TIME_LIMIT:
+                        truncated_reason = f"search truncated after {_GREP_TIME_LIMIT}s"
+                        break
+                    # Check file count limit
+                    if files_scanned >= _GREP_MAX_FILES:
+                        truncated_reason = f"search truncated after scanning {_GREP_MAX_FILES} files"
+                        break
                     fpath = os.path.join(dirpath, fname)
+                    # Skip binary files
+                    if _is_binary(fpath):
+                        continue
+                    files_scanned += 1
                     rel = os.path.relpath(fpath, root).replace("\\", "/")
                     try:
                         with open(fpath, "r", encoding="utf-8", errors="replace") as f:
@@ -136,7 +168,12 @@ class RLMRepl:
                                         return "\n".join(results)
                     except (OSError, UnicodeDecodeError):
                         continue
-            return "\n".join(results) if results else "No matches found"
+                if truncated_reason:
+                    break
+            output = "\n".join(results) if results else "No matches found"
+            if truncated_reason:
+                output += f"\n[Note: {truncated_reason} — try narrowing the search path]"
+            return output
 
         def chunk_indices(file_path: str, size: int = 200, overlap: int = 20) -> list:
             """Compute (start_line, end_line) tuples for chunking a file."""
@@ -240,8 +277,13 @@ class RLMRepl:
             self._save_state()
             return {"success": True}
 
-    def exec(self, code: str) -> dict:
-        """Execute Python code in the REPL namespace."""
+    def exec(self, code: str, timeout: Optional[float] = None) -> dict:
+        """Execute Python code in the REPL namespace.
+
+        Args:
+            code: Python code to execute.
+            timeout: Max execution time in seconds. None means no timeout.
+        """
         with self._lock:
             # Create fresh tracker and snapshot existing vars
             tracker = _DependencyTracker(self.root)
@@ -251,13 +293,38 @@ class RLMRepl:
             stdout_capture = io.StringIO()
             old_stdout = sys.stdout
             error = None
-            try:
+            timed_out = False
+
+            if timeout is not None and timeout > 0:
+                # Run code in a thread with timeout
+                exec_error = [None]
+
+                def _run():
+                    try:
+                        exec(code, self._namespace)
+                    except Exception:
+                        exec_error[0] = traceback.format_exc()
+
                 sys.stdout = stdout_capture
-                exec(code, self._namespace)
-            except Exception:
-                error = traceback.format_exc()
-            finally:
+                t = threading.Thread(target=_run, daemon=True)
+                t.start()
+                t.join(timeout)
                 sys.stdout = old_stdout
+
+                if t.is_alive():
+                    # Thread still running — timed out
+                    timed_out = True
+                    error = f"Execution timed out after {timeout}s"
+                elif exec_error[0]:
+                    error = exec_error[0]
+            else:
+                try:
+                    sys.stdout = stdout_capture
+                    exec(code, self._namespace)
+                except Exception:
+                    error = traceback.format_exc()
+                finally:
+                    sys.stdout = old_stdout
 
             output = stdout_capture.getvalue()
             if len(output) > MAX_OUTPUT_CHARS:
@@ -306,11 +373,16 @@ class RLMRepl:
             ]
 
             result = {
-                "success": error is None,
+                "success": error is None and not timed_out,
                 "output": output,
                 "variables": variables,
             }
-            if error:
+            if timed_out:
+                result["timed_out"] = True
+                result["error"] = error
+                hint = "Try narrowing the search scope or using a smaller path"
+                result["hint"] = hint
+            elif error:
                 result["error"] = error
 
             # Check staleness

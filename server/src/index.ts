@@ -799,6 +799,10 @@ server.tool(
 );
 
 // --- rlm_repl_exec ---
+const RLM_REPL_MAX_RETRIES = parseInt(process.env.RLM_REPL_MAX_RETRIES || "3", 10);
+const REPL_EXEC_TIMEOUTS = [30, 60, 120]; // seconds per attempt
+const REPL_TCP_BUFFER = 15; // extra seconds for TCP beyond exec timeout
+
 server.tool(
   "rlm_repl_exec",
   `Execute Python code in the stateful REPL. Variables persist across calls. Built-in helpers:
@@ -809,36 +813,69 @@ server.tool(
 - add_buffer(key, text) — accumulate findings in named buffers`,
   {
     code: z.string().describe("Python code to execute in the REPL"),
+    timeout: z
+      .number()
+      .int()
+      .min(1)
+      .max(300)
+      .default(30)
+      .describe("Execution timeout in seconds (default 30, max 300)"),
   },
-  async ({ code }) => {
-    try {
-      const result = await queryDaemonWithRetry({ action: "repl_exec", code });
-      if (result.error && !result.output) {
+  async ({ code, timeout: userTimeout }) => {
+    const maxRetries = Math.min(RLM_REPL_MAX_RETRIES, REPL_EXEC_TIMEOUTS.length);
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const execTimeout = attempt === 0 ? userTimeout : REPL_EXEC_TIMEOUTS[Math.min(attempt, REPL_EXEC_TIMEOUTS.length - 1)];
+      const tcpTimeout = (execTimeout + REPL_TCP_BUFFER) * 1000;
+
+      try {
+        const result = await queryDaemonWithRetry(
+          { action: "repl_exec", code, timeout: execTimeout },
+          tcpTimeout,
+        );
+
+        // If timed out and we have retries left, try again with higher timeout
+        if (result.timed_out && attempt < maxRetries - 1) {
+          continue;
+        }
+
+        if (result.error && !result.output) {
+          let errorText = `Error:\n${result.error}`;
+          if (result.hint) errorText += `\nHint: ${result.hint}`;
+          return {
+            content: [{ type: "text" as const, text: errorText }],
+            isError: true,
+          };
+        }
+        let text = "";
+        if (result.output) text += result.output;
+        if (result.error) text += `\nError:\n${result.error}`;
+        if (result.hint) text += `\nHint: ${result.hint}`;
+        if (result.variables && result.variables.length > 0) {
+          text += `\nVariables: ${result.variables.join(", ")}`;
+        }
+        if (result.staleness_warning) {
+          text += formatStalenessWarning(result.staleness_warning);
+        }
         return {
-          content: [{ type: "text" as const, text: `Error:\n${result.error}` }],
+          content: [{ type: "text" as const, text: truncateResponse(text.trim()) }],
+        };
+      } catch (err: any) {
+        // On TCP/connection errors, don't retry with timeout backoff — let queryDaemonWithRetry handle daemon respawn
+        return {
+          content: [
+            { type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` },
+          ],
           isError: true,
         };
       }
-      let text = "";
-      if (result.output) text += result.output;
-      if (result.error) text += `\nError:\n${result.error}`;
-      if (result.variables && result.variables.length > 0) {
-        text += `\nVariables: ${result.variables.join(", ")}`;
-      }
-      if (result.staleness_warning) {
-        text += formatStalenessWarning(result.staleness_warning);
-      }
-      return {
-        content: [{ type: "text" as const, text: truncateResponse(text.trim()) }],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          { type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` },
-        ],
-        isError: true,
-      };
     }
+
+    // Should not reach here, but safety fallback
+    return {
+      content: [{ type: "text" as const, text: "REPL execution failed after all retry attempts." }],
+      isError: true,
+    };
   }
 );
 

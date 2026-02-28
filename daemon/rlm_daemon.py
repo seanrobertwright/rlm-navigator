@@ -662,7 +662,8 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
         if repl is None:
             return json.dumps({"error": "REPL not available"}).encode("utf-8")
         code = req.get("code", "")
-        result = repl.exec(code)
+        timeout = req.get("timeout", 30)
+        result = repl.exec(code, timeout=timeout)
         return json.dumps(result).encode("utf-8")
 
     elif action == "repl_status":
