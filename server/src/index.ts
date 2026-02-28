@@ -614,7 +614,8 @@ server.tool(
 - grep(pattern, path=".", max_results=50) — regex search across files
 - chunk_indices(file_path, size=200, overlap=20) — compute chunk boundaries
 - write_chunks(file_path, out_dir=None, size=200, overlap=20) — write chunks to disk
-- add_buffer(key, text) — accumulate findings in named buffers`,
+- add_buffer(key, text) — accumulate findings in named buffers
+Note: On Windows, shell commands (subprocess) may not work. Use the built-in helpers instead.`,
   {
     code: z.string().describe("Python code to execute in the REPL"),
     timeout: z

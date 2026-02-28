@@ -122,15 +122,15 @@ class RLMRepl:
             except OSError:
                 return True
 
-        def grep(pattern: str, path: str = ".", max_results: int = 50) -> str:
-            """Regex search across files, return file:line:content."""
+        def grep(pattern: str, path: str = ".", max_results: int = 50) -> list[str]:
+            """Regex search across files, return list of file:line:content strings."""
             search_root = os.path.join(root, path)
             if not os.path.exists(search_root):
-                return f"Error: path not found: {path}"
+                return [f"Error: path not found: {path}"]
             try:
                 regex = re.compile(pattern)
             except re.error as e:
-                return f"Error: invalid regex: {e}"
+                return [f"Error: invalid regex: {e}"]
             tracker = _get_tracker()
             results = []
             files_scanned = 0
@@ -165,15 +165,14 @@ class RLMRepl:
                                         tracker.track_file(rel, fpath)
                                     results.append(f"{rel}:{i}:{line.rstrip()}")
                                     if len(results) >= max_results:
-                                        return "\n".join(results)
+                                        return results
                     except (OSError, UnicodeDecodeError):
                         continue
                 if truncated_reason:
                     break
-            output = "\n".join(results) if results else "No matches found"
             if truncated_reason:
-                output += f"\n[Note: {truncated_reason} — try narrowing the search path]"
-            return output
+                results.append(f"[Note: {truncated_reason} — try narrowing the search path]")
+            return results
 
         def chunk_indices(file_path: str, size: int = 200, overlap: int = 20) -> list:
             """Compute (start_line, end_line) tuples for chunking a file."""

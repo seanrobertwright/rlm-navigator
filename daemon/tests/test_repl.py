@@ -124,17 +124,19 @@ class TestReplHelpers:
         (tmp_path / "b.py").write_text("def world():\n    pass\n")
         repl = RLMRepl(str(tmp_path))
         repl.init()
-        result = repl.exec("print(grep('hello'))")
+        result = repl.exec("result = grep('hello')\nprint(result)")
         assert result["success"] is True
         assert "a.py" in result["output"]
         assert "hello" in result["output"]
+        # Verify it's a list (repr starts with '[')
+        assert result["output"].strip().startswith("[")
 
     def test_grep_no_matches(self, tmp_path):
         (tmp_path / "a.py").write_text("def foo(): pass\n")
         repl = RLMRepl(str(tmp_path))
         repl.init()
         result = repl.exec("print(grep('zzz_nonexistent'))")
-        assert "No matches" in result["output"]
+        assert "[]" in result["output"]
 
     def test_chunk_indices(self, tmp_path):
         # Create a 500-line file
