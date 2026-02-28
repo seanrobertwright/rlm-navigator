@@ -32,6 +32,126 @@ const BANNER = `
   ${chalk.cyan("╚═══════════════════════════════════════════════════╝")}
 `;
 
+// ---------------------------------------------------------------------------
+// Enrichment Provider Data
+// ---------------------------------------------------------------------------
+
+const ENRICHMENT_PROVIDERS = [
+  {
+    name: "Anthropic",
+    key: "anthropic",
+    desc: "Claude Haiku 4.5",
+    api_key_env: "ANTHROPIC_API_KEY",
+    models: [
+      { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (recommended)" },
+      { id: "claude-sonnet-4-5-20250514", label: "Claude Sonnet 4.5" },
+    ],
+  },
+  {
+    name: "OpenAI",
+    key: "openai",
+    desc: "GPT-4o-mini, GPT-4o, GPT-4.1-mini",
+    api_key_env: "OPENAI_API_KEY",
+    models: [
+      { id: "gpt-4o-mini", label: "GPT-4o-mini (recommended)" },
+      { id: "gpt-4o", label: "GPT-4o" },
+      { id: "gpt-4.1-mini", label: "GPT-4.1-mini" },
+    ],
+  },
+  {
+    name: "OpenRouter",
+    key: "openrouter",
+    desc: "Multi-provider proxy",
+    api_key_env: "OPENROUTER_API_KEY",
+    models: [
+      { id: "anthropic/claude-haiku-4-5", label: "Claude Haiku 4.5 (recommended)" },
+      { id: "openai/gpt-4o-mini", label: "GPT-4o-mini" },
+      { id: "google/gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+      { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
+    ],
+  },
+];
+
+function apiKeyInstructions(envVar) {
+  const isWindows = process.platform === "win32";
+  if (isWindows) {
+    return [
+      chalk.bold("  Set your API key (PowerShell):"),
+      chalk.dim(`    $env:${envVar} = "your-key-here"`) + chalk.dim("                # current session"),
+      chalk.dim(`    [System.Environment]::SetEnvironmentVariable("${envVar}", "your-key-here", "User")`) + chalk.dim("  # permanent"),
+    ];
+  }
+  return [
+    chalk.bold("  Set your API key (bash/zsh):"),
+    chalk.dim(`    export ${envVar}="your-key-here"`) + chalk.dim("                # current session"),
+    chalk.dim(`    echo 'export ${envVar}="your-key-here"' >> ~/.bashrc`) + chalk.dim("   # permanent"),
+  ];
+}
+
+async function configureEnrichment() {
+  console.log("");
+  console.log(chalk.bold.cyan("  Enrichment Provider"));
+  console.log(chalk.dim("  Enrichment adds semantic summaries to code skeletons using a small LLM."));
+  console.log(chalk.dim("  Requires an API key from your chosen provider."));
+  console.log("");
+
+  // Provider selection
+  for (let i = 0; i < ENRICHMENT_PROVIDERS.length; i++) {
+    const p = ENRICHMENT_PROVIDERS[i];
+    console.log(`  ${chalk.cyan(i + 1 + ")")} ${chalk.white(p.name)}  ${chalk.dim("(" + p.desc + ")")}`);
+  }
+  console.log(`  ${chalk.cyan(ENRICHMENT_PROVIDERS.length + 1 + ")")} ${chalk.dim("Skip (no enrichment)")}`);
+  console.log("");
+
+  const providerAnswer = await ask(chalk.cyan("  ? ") + "Select provider " + chalk.dim(`[1-${ENRICHMENT_PROVIDERS.length + 1}] `) );
+  const providerIdx = parseInt(providerAnswer, 10) - 1;
+
+  if (isNaN(providerIdx) || providerIdx < 0 || providerIdx >= ENRICHMENT_PROVIDERS.length) {
+    console.log(chalk.dim("  Skipping enrichment configuration."));
+    return null;
+  }
+
+  const provider = ENRICHMENT_PROVIDERS[providerIdx];
+
+  // Model selection
+  console.log("");
+  console.log(chalk.bold(`  ${provider.name} Models:`));
+  for (let i = 0; i < provider.models.length; i++) {
+    console.log(`  ${chalk.cyan(i + 1 + ")")} ${provider.models[i].label}`);
+  }
+  console.log("");
+
+  const modelAnswer = await ask(chalk.cyan("  ? ") + "Select model " + chalk.dim(`[1-${provider.models.length}] `));
+  const modelIdx = parseInt(modelAnswer, 10) - 1;
+  const model = provider.models[Math.max(0, Math.min(modelIdx, provider.models.length - 1))] || provider.models[0];
+
+  // API key instructions
+  console.log("");
+  const instructions = apiKeyInstructions(provider.api_key_env);
+  for (const line of instructions) {
+    console.log(line);
+  }
+  console.log("");
+
+  return {
+    provider: provider.key,
+    model: model.id,
+    api_key_env: provider.api_key_env,
+  };
+}
+
+function writeEnrichmentConfig(enrichment) {
+  const configPath = path.join(RLM_DIR, "config.json");
+  let config = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } catch {}
+  }
+  config.enrichment = enrichment || { provider: null, model: null, api_key_env: null };
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+}
+
 function banner() {
   console.log(BANNER);
 }
@@ -409,6 +529,16 @@ async function install() {
   installPythonDeps(python);
   buildMcpServer();
   integrateClaudeMd();
+
+  // Enrichment provider selection
+  const enrichment = await configureEnrichment();
+  let enrichSpinner = step("Saving enrichment configuration...");
+  writeEnrichmentConfig(enrichment);
+  if (enrichment) {
+    enrichSpinner.succeed(`Enrichment: ${enrichment.provider} / ${enrichment.model}`);
+  } else {
+    enrichSpinner.succeed("Enrichment: skipped");
+  }
 
   // .gitignore prompt (install-only)
   let spinner = step("Checking .gitignore...");
