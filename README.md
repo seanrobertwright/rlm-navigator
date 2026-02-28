@@ -724,6 +724,70 @@ python benchmark.py --root . --file "<large_file>" --mode chunks
 
 ---
 
+### Test 13: Haiku Enrichment Verbosity
+
+**Purpose**: Verify that Haiku enrichment activity is visible — status flags, progress notifications, and annotated skeletons all surface correctly.
+
+**Prerequisites**: Set `ANTHROPIC_API_KEY` in your environment or `.env` file, and ensure the `anthropic` SDK is installed (`pip install anthropic`).
+
+#### 13a: Status Reports Enrichment Availability
+
+**Prompt**: *"Check if RLM Navigator is running."*
+
+**What to verify**:
+- Claude calls `get_status`
+- The response includes `enrichment_available: true` (visible in the daemon's raw JSON response)
+- If the API key or SDK is missing, it reports `enrichment_available: false` — enrichment degrades gracefully without errors
+
+#### 13b: Progress Notifications During Navigation
+
+**Prompt**: *"Find and explain the authentication flow in this project."* (or any broad question that triggers multi-file exploration)
+
+**What to verify**:
+- As the sub-agent system dispatches work, `rlm_progress` emits `[RLM]`-prefixed messages:
+  - `[RLM] Chunking <file>...` — file is being split for analysis
+  - `[RLM] Dispatching chunk 1/3 of <file> to rlm-enricher...` — Haiku enrichment dispatched
+  - `[RLM] chunk 1/3 complete — N relevant symbols found` — enrichment finished
+- After the workflow completes, `get_status` shows updated Sub-agent Activity:
+  - `Dispatches: N (M chunk analysis, K enrichment)`
+  - `Chunks analyzed: X | Answers found: Y`
+  - `Last: [RLM] <most recent progress message>`
+
+#### 13c: Enriched Skeleton Annotations
+
+**Prompt**: *"Map `<file_with_many_functions>`."* (pick a file with 5+ functions/methods)
+
+**What to verify**:
+- Claude calls `rlm_map` and the skeleton includes Haiku-generated annotations after line ranges:
+  ```
+  def validate_token(self, token: str) -> bool:  # L25-30  # Checks if token starts with 'sk-' prefix.
+  class AuthManager:  # L1-80  # Manages JWT-based authentication lifecycle.
+  ```
+- Each annotation is a concise 1-line semantic summary describing **what the symbol does** (not just its type)
+- Without `ANTHROPIC_API_KEY`, the same `rlm_map` call returns a clean skeleton with no annotations — no errors, no placeholders
+
+#### 13d: Enrichment Cache Behavior
+
+**Steps**:
+1. Map a file: *"Show me the skeleton of `<file>`."* — first call triggers Haiku enrichment (may take 1-2 seconds)
+2. Map the same file again immediately
+
+**What to verify**:
+- The second call returns instantly with identical annotations (served from `EnrichmentCache`)
+- Edit the file in a separate editor, then map again — annotations refresh because the cache invalidates on mtime change
+
+#### 13e: Background Enrichment Worker
+
+**Prompt**: *"Show me the project structure, then map the 3 largest Python files."*
+
+**What to verify**:
+- The `EnrichmentWorker` processes files in the background — enrichment does not block the `rlm_map` response
+- On the first call to a file, the skeleton may return without annotations (enrichment still queued)
+- A subsequent call to the same file shows annotations once the worker has processed it
+- `get_status` reflects enrichment worker activity in the session stats
+
+---
+
 ### Troubleshooting
 
 | Symptom | Check |
@@ -733,6 +797,8 @@ python benchmark.py --root . --file "<large_file>" --mode chunks
 | Claude uses `Read`/`cat` instead of RLM tools | Check that the skill is loaded: verify `.claude/skills/rlm-navigator/SKILL.md` exists in your project |
 | Stale data after file edits | Verify the file watcher is active: `get_status` should show the daemon watching the correct root |
 | Port conflict on startup | Set a custom port: `RLM_DAEMON_PORT=9200 python daemon/rlm_daemon.py --root .` |
+| Haiku enrichment not appearing | Verify `ANTHROPIC_API_KEY` is set and `pip install anthropic` is installed. Check `get_status` for `enrichment_available: true` |
+| Enrichment annotations stale after edit | The `EnrichmentCache` invalidates on mtime change — re-map the file to trigger a fresh Haiku call |
 
 ---
 
