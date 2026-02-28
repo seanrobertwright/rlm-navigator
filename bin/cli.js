@@ -123,7 +123,9 @@ async function configureEnrichment() {
 
   const modelAnswer = await ask(chalk.cyan("  ? ") + "Select model " + chalk.dim(`[1-${provider.models.length}] `));
   const modelIdx = parseInt(modelAnswer, 10) - 1;
-  const model = provider.models[Math.max(0, Math.min(modelIdx, provider.models.length - 1))] || provider.models[0];
+  const model = (modelIdx >= 0 && modelIdx < provider.models.length)
+    ? provider.models[modelIdx]
+    : provider.models[0];
 
   // API key instructions
   console.log("");
@@ -146,7 +148,9 @@ function writeEnrichmentConfig(enrichment) {
   if (fs.existsSync(configPath)) {
     try {
       config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    } catch {}
+    } catch (err) {
+      console.log(chalk.dim(`  Warning: could not parse existing config.json, overwriting. (${err.message})`));
+    }
   }
   config.enrichment = enrichment || { provider: null, model: null, api_key_env: null };
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
