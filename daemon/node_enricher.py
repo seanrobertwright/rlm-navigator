@@ -1,25 +1,53 @@
-"""Node enricher — generates semantic summaries for AST skeleton nodes using Haiku.
+"""Node enricher — generates semantic summaries for AST skeleton nodes.
 
-Parses skeleton output from squeezer.py, batches symbols, calls Haiku for 1-line
-summaries, caches results by file path + mtime.
+Parses skeleton output from squeezer.py, batches symbols, calls the configured
+LLM provider for 1-line summaries, caches results by file path + mtime.
 """
 
+import importlib
 import queue
 import re
 import json
 import threading
 from typing import Optional
 
-# Lazy-loaded SDK modules (set when first used)
-anthropic = None
-openai = None
+# Lazy-loaded SDK modules and client instances
+_sdk_cache: dict[str, object] = {}
+_client_cache: dict[tuple, object] = {}
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
+def _get_sdk(name: str):
+    """Lazy-import an SDK module by name."""
+    if name not in _sdk_cache:
+        _sdk_cache[name] = importlib.import_module(name)
+    return _sdk_cache[name]
+
+
+def _get_client(provider: str, api_key: str, base_url: str | None = None):
+    """Get or create a cached SDK client instance."""
+    key = (provider, api_key, base_url)
+    if key not in _client_cache:
+        if provider == "anthropic":
+            sdk = _get_sdk("anthropic")
+            _client_cache[key] = sdk.Anthropic(api_key=api_key)
+        else:
+            sdk = _get_sdk("openai")
+            _client_cache[key] = sdk.OpenAI(api_key=api_key, base_url=base_url)
+    return _client_cache[key]
+
+
+def _parse_enrichment_response(text: str) -> Optional[dict]:
+    """Parse LLM response text into enrichment dict. Handles markdown fences."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    return json.loads(text)
+
+
 def call_enrichment_api(prompt: str, config) -> Optional[str]:
     """Dispatch enrichment call to the configured provider. Returns raw text or None."""
-    global anthropic, openai
     provider = config.enrichment_provider
     api_key = config.enrichment_api_key
     model = config.enrichment_model
@@ -28,10 +56,7 @@ def call_enrichment_api(prompt: str, config) -> Optional[str]:
         return None
 
     if provider == "anthropic":
-        if anthropic is None:
-            import anthropic as _anthropic
-            anthropic = _anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        client = _get_client("anthropic", api_key)
         response = client.messages.create(
             model=model,
             max_tokens=1024,
@@ -40,11 +65,8 @@ def call_enrichment_api(prompt: str, config) -> Optional[str]:
         return response.content[0].text
 
     elif provider in ("openai", "openrouter"):
-        if openai is None:
-            import openai as _openai
-            openai = _openai
         base_url = OPENROUTER_BASE_URL if provider == "openrouter" else None
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        client = _get_client(provider, api_key, base_url)
         response = client.chat.completions.create(
             model=model,
             max_tokens=1024,
@@ -55,7 +77,7 @@ def call_enrichment_api(prompt: str, config) -> Optional[str]:
     return None
 
 
-# Haiku prompt template
+# Enrichment prompt template
 ENRICHMENT_PROMPT = """You are a code analyst. Given these code signatures from {filename}, provide a concise 1-line semantic summary for each symbol describing what it does (not what it is).
 
 Symbols:
@@ -182,10 +204,7 @@ async def enrich_file(file_path: str, skeleton: str, config) -> Optional[dict]:
         text = call_enrichment_api(prompt, config)
         if text is None:
             return None
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-        return json.loads(text)
+        return _parse_enrichment_response(text)
     except Exception:
         return None
 
@@ -237,10 +256,7 @@ class EnrichmentWorker:
             text = call_enrichment_api(prompt, self._config)
             if text is None:
                 return True
-            text = text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-            enrichments = json.loads(text)
+            enrichments = _parse_enrichment_response(text)
             self._cache.put(file_path, mtime, enrichments)
         except Exception:
             pass  # Enrichment is best-effort
