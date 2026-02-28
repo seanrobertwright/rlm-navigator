@@ -651,7 +651,7 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
 
     elif action == "status":
         from config import RLMConfig
-        cfg = RLMConfig()
+        cfg = RLMConfig(root=root)
         resp = {
             "status": "alive",
             "root": root,
@@ -761,7 +761,7 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
         if not is_document_file(abs_path):
             return json.dumps({"error": f"Not a document file: {rel}"}).encode("utf-8")
 
-        cfg = RLMConfig()
+        cfg = RLMConfig(root=root)
         tree = index_document(abs_path, cfg)
         if tree is None:
             return json.dumps({"error": f"Failed to index: {rel}"}).encode("utf-8")
@@ -782,7 +782,7 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
 
         from doc_indexer import index_document
         from config import RLMConfig
-        cfg = RLMConfig()
+        cfg = RLMConfig(root=root)
         tree = index_document(abs_path, cfg)
         if not tree:
             return json.dumps({"error": "Failed to index document"}).encode("utf-8")
