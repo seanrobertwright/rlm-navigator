@@ -120,6 +120,14 @@ class SessionStats:
         self.bytes_served = 0
         self.bytes_avoided = 0
         self.per_action: dict[str, dict] = {}
+        self.progress_events: list[dict] = []
+        self.progress_summary = {
+            "sub_agent_dispatches": 0,
+            "chunks_analyzed": 0,
+            "answers_found": 0,
+            "enrichments": 0,
+            "analyses": 0,
+        }
 
     def record(self, action: str, served_bytes: int, avoided_bytes: int = 0):
         with self._lock:
@@ -131,6 +139,23 @@ class SessionStats:
             self.per_action[action]["calls"] += 1
             self.per_action[action]["bytes_served"] += served_bytes
             self.per_action[action]["bytes_avoided"] += avoided_bytes
+
+    def record_progress(self, event: str, details: dict):
+        with self._lock:
+            entry = {"event": event, "details": details, "timestamp": time.time()}
+            self.progress_events.append(entry)
+
+            if event == "chunk_dispatch":
+                self.progress_summary["sub_agent_dispatches"] += 1
+                agent = details.get("agent", "")
+                if agent == "rlm-enricher":
+                    self.progress_summary["enrichments"] += 1
+                else:
+                    self.progress_summary["analyses"] += 1
+            elif event == "chunk_complete":
+                self.progress_summary["chunks_analyzed"] += 1
+            elif event == "answer_found":
+                self.progress_summary["answers_found"] += 1
 
     def to_dict(self) -> dict:
         with self._lock:
@@ -145,14 +170,19 @@ class SessionStats:
                 if data["bytes_avoided"] > 0:
                     entry["tokens_avoided"] = data["bytes_avoided"] // 4
                 breakdown[action] = entry
-            return {
+            result = {
                 "tool_calls": self.tool_calls,
                 "tokens_served": self.bytes_served // 4,
                 "tokens_avoided": self.bytes_avoided // 4,
                 "reduction_pct": reduction_pct,
                 "duration_s": round(time.time() - self.session_start),
                 "breakdown": breakdown,
+                "progress_events": [dict(e) for e in self.progress_events],
+                "progress_summary": dict(self.progress_summary),
             }
+            if self.progress_events:
+                result["progress_last_event"] = dict(self.progress_events[-1])
+            return result
 
 
 class SkeletonCache:
@@ -777,6 +807,22 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
         if stats:
             stats.record("assess", len(response))
         return response
+
+    elif action == "progress":
+        event = req.get("event", "")
+        details = req.get("details", {})
+        valid_events = {
+            "chunking_start", "chunking_complete", "chunk_dispatch",
+            "chunk_complete", "synthesis_start", "synthesis_complete",
+            "answer_found", "queries_suggested",
+        }
+        if not event:
+            return json.dumps({"error": "Missing 'event' field"}).encode("utf-8")
+        if event not in valid_events:
+            return json.dumps({"error": f"Invalid event: {event}. Valid: {sorted(valid_events)}"}).encode("utf-8")
+        if stats:
+            stats.record_progress(event, details)
+        return json.dumps({"ok": True}).encode("utf-8")
 
     elif action == "shutdown":
         if shutdown_event is None:

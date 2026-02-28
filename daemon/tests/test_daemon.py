@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rlm_daemon import SkeletonCache, build_tree, handle_request, run_server
+from rlm_daemon import SkeletonCache, SessionStats, build_tree, handle_request, run_server
 
 
 def _get_free_port() -> int:
@@ -555,3 +555,136 @@ class TestEnrichmentIntegration:
         assert isinstance(resp["enrichment_available"], bool)
         assert "doc_indexing_available" in resp
         assert isinstance(resp["doc_indexing_available"], bool)
+
+
+# ---------------------------------------------------------------------------
+# SessionStats progress tracking tests (Task 1)
+# ---------------------------------------------------------------------------
+
+class TestSessionProgress:
+    def test_progress_summary_initial(self):
+        """SessionStats starts with empty progress data."""
+        stats = SessionStats()
+        d = stats.to_dict()
+        assert d["progress_summary"]["sub_agent_dispatches"] == 0
+        assert d["progress_summary"]["chunks_analyzed"] == 0
+        assert d["progress_summary"]["answers_found"] == 0
+        assert d["progress_summary"]["enrichments"] == 0
+        assert d["progress_summary"]["analyses"] == 0
+        assert d["progress_events"] == []
+
+    def test_record_progress_chunk_dispatch(self):
+        """record_progress increments dispatch counters."""
+        stats = SessionStats()
+        stats.record_progress("chunk_dispatch", {"agent": "rlm-subcall", "file": "main.py", "chunk": 0, "total_chunks": 3})
+        d = stats.to_dict()
+        assert d["progress_summary"]["sub_agent_dispatches"] == 1
+        assert d["progress_summary"]["analyses"] == 1
+        assert d["progress_summary"]["enrichments"] == 0
+        assert len(d["progress_events"]) == 1
+        assert d["progress_events"][0]["event"] == "chunk_dispatch"
+
+    def test_record_progress_enrichment_dispatch(self):
+        """record_progress counts enrichment dispatches separately."""
+        stats = SessionStats()
+        stats.record_progress("chunk_dispatch", {"agent": "rlm-enricher", "file": "main.py"})
+        d = stats.to_dict()
+        assert d["progress_summary"]["enrichments"] == 1
+        assert d["progress_summary"]["analyses"] == 0
+
+    def test_record_progress_chunk_complete(self):
+        """chunk_complete increments chunks_analyzed."""
+        stats = SessionStats()
+        stats.record_progress("chunk_complete", {"chunk": 0, "total_chunks": 3})
+        d = stats.to_dict()
+        assert d["progress_summary"]["chunks_analyzed"] == 1
+
+    def test_record_progress_answer_found(self):
+        """answer_found increments counter."""
+        stats = SessionStats()
+        stats.record_progress("answer_found", {"summary": "Found the auth handler"})
+        d = stats.to_dict()
+        assert d["progress_summary"]["answers_found"] == 1
+
+    def test_progress_events_have_timestamps(self):
+        """Each event gets a timestamp."""
+        stats = SessionStats()
+        stats.record_progress("chunking_start", {"file": "main.py"})
+        d = stats.to_dict()
+        assert "timestamp" in d["progress_events"][0]
+
+    def test_last_event_tracked(self):
+        """to_dict includes last_event for display."""
+        stats = SessionStats()
+        stats.record_progress("chunk_dispatch", {"file": "main.py", "chunk": 2, "total_chunks": 5, "agent": "rlm-subcall"})
+        stats.record_progress("chunk_complete", {"file": "main.py", "chunk": 2, "total_chunks": 5})
+        d = stats.to_dict()
+        assert d["progress_last_event"]["event"] == "chunk_complete"
+
+
+# ---------------------------------------------------------------------------
+# Progress action handler tests (Task 2)
+# ---------------------------------------------------------------------------
+
+class TestProgressAction:
+    @pytest.fixture
+    def project(self, tmp_path):
+        (tmp_path / "test.py").write_text("def foo(): pass\n")
+        return str(tmp_path)
+
+    def test_progress_action_returns_ok(self, project):
+        """Progress action stores event and returns ok."""
+        cache = SkeletonCache()
+        stats = SessionStats()
+        data = json.dumps({
+            "action": "progress",
+            "event": "chunk_dispatch",
+            "details": {"file": "main.py", "agent": "rlm-subcall", "chunk": 0, "total_chunks": 3}
+        }).encode()
+        resp = json.loads(handle_request(data, cache, project, stats=stats))
+        assert resp["ok"] is True
+
+    def test_progress_action_updates_stats(self, project):
+        """Progress action increments session counters."""
+        cache = SkeletonCache()
+        stats = SessionStats()
+        data = json.dumps({
+            "action": "progress",
+            "event": "chunk_dispatch",
+            "details": {"file": "main.py", "agent": "rlm-subcall", "chunk": 0, "total_chunks": 3}
+        }).encode()
+        handle_request(data, cache, project, stats=stats)
+        d = stats.to_dict()
+        assert d["progress_summary"]["sub_agent_dispatches"] == 1
+
+    def test_progress_action_without_stats(self, project):
+        """Progress action returns ok even without stats object."""
+        cache = SkeletonCache()
+        data = json.dumps({
+            "action": "progress",
+            "event": "chunking_start",
+            "details": {"file": "main.py"}
+        }).encode()
+        resp = json.loads(handle_request(data, cache, project))
+        assert resp["ok"] is True
+
+    def test_progress_action_missing_event(self, project):
+        """Progress action returns error when event is missing."""
+        cache = SkeletonCache()
+        data = json.dumps({
+            "action": "progress",
+            "details": {"file": "main.py"}
+        }).encode()
+        resp = json.loads(handle_request(data, cache, project))
+        assert "error" in resp
+
+    def test_progress_action_invalid_event(self, project):
+        """Progress action rejects unknown event types."""
+        cache = SkeletonCache()
+        data = json.dumps({
+            "action": "progress",
+            "event": "invalid_event",
+            "details": {}
+        }).encode()
+        resp = json.loads(handle_request(data, cache, project))
+        assert "error" in resp
