@@ -16,19 +16,18 @@ from node_enricher import (
     EnrichmentWorker,
     merge_enrichments,
 )
-
-
-def _ensure_anthropic_module():
-    """Ensure a fake 'anthropic' module exists in sys.modules for monkeypatching."""
-    if "anthropic" not in sys.modules:
-        mod = types.ModuleType("anthropic")
-        mod.Anthropic = None  # Will be patched per-test
-        sys.modules["anthropic"] = mod
+import node_enricher
 
 
 @pytest.mark.e2e
 class TestEnrichmentPipelineE2E:
-    def test_full_enrichment_pipeline(self, tmp_path, monkeypatch):
+
+    def setup_method(self):
+        """Clear SDK and client caches between tests."""
+        node_enricher._sdk_cache.clear()
+        node_enricher._client_cache.clear()
+
+    def test_full_enrichment_pipeline(self, tmp_path):
         """Full enrichment: squeeze → parse → mock API → cache → merge."""
         f = tmp_path / "calc.py"
         f.write_text(
@@ -50,7 +49,7 @@ class TestEnrichmentPipelineE2E:
         assert "add" in symbol_names
         assert "multiply" in symbol_names
 
-        # Step 3: Mock Anthropic API
+        # Step 3: Mock Anthropic API via _sdk_cache
         mock_enrichments = {
             "Calculator": "Performs basic arithmetic operations.",
             "add": "Returns the sum of two numbers.",
@@ -70,12 +69,15 @@ class TestEnrichmentPipelineE2E:
         class MockClient:
             messages = MockMessages()
 
-        _ensure_anthropic_module()
-        monkeypatch.setattr("anthropic.Anthropic", lambda **kw: MockClient())
+        mock_sdk = types.ModuleType("anthropic")
+        mock_sdk.Anthropic = lambda **kw: MockClient()
+        node_enricher._sdk_cache["anthropic"] = mock_sdk
 
         class MockConfig:
             enrichment_enabled = True
-            anthropic_api_key = "sk-test"
+            enrichment_provider = "anthropic"
+            enrichment_model = "claude-haiku-4-5-20251001"
+            enrichment_api_key = "sk-test"
 
         # Step 4: Enqueue and process
         cache = EnrichmentCache()
@@ -99,7 +101,7 @@ class TestEnrichmentPipelineE2E:
         assert "# Performs basic arithmetic operations." in enriched
         assert "# Returns the sum of two numbers." in enriched
 
-    def test_api_failure_graceful_degradation(self, tmp_path, monkeypatch):
+    def test_api_failure_graceful_degradation(self, tmp_path):
         """API failure should not crash; cache should remain empty."""
         f = tmp_path / "broken.py"
         f.write_text(
@@ -113,7 +115,9 @@ class TestEnrichmentPipelineE2E:
 
         class MockConfig:
             enrichment_enabled = True
-            anthropic_api_key = "sk-test"
+            enrichment_provider = "anthropic"
+            enrichment_model = "claude-haiku-4-5-20251001"
+            enrichment_api_key = "sk-test"
 
         class FailingMessages:
             def create(self, **kwargs):
@@ -122,8 +126,9 @@ class TestEnrichmentPipelineE2E:
         class FailingClient:
             messages = FailingMessages()
 
-        _ensure_anthropic_module()
-        monkeypatch.setattr("anthropic.Anthropic", lambda **kw: FailingClient())
+        mock_sdk = types.ModuleType("anthropic")
+        mock_sdk.Anthropic = lambda **kw: FailingClient()
+        node_enricher._sdk_cache["anthropic"] = mock_sdk
 
         cache = EnrichmentCache()
         worker = EnrichmentWorker(cache, config=MockConfig())
