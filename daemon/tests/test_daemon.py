@@ -688,3 +688,64 @@ class TestProgressAction:
         }).encode()
         resp = json.loads(handle_request(data, cache, project))
         assert "error" in resp
+
+
+# ---------------------------------------------------------------------------
+# E2E progress tracking integration tests (Task 7)
+# ---------------------------------------------------------------------------
+
+class TestProgressIntegration:
+    @pytest.fixture
+    def project(self, tmp_path):
+        (tmp_path / "test.py").write_text("def foo(): pass\n")
+        return str(tmp_path)
+
+    def test_full_workflow_progress(self, project):
+        """Simulate a full chunk-delegate-synthesize progress flow."""
+        cache = SkeletonCache()
+        stats = SessionStats()
+
+        events = [
+            ("chunking_start", {"file": "big.py", "query": "how does auth work"}),
+            ("chunking_complete", {"file": "big.py", "total_chunks": 3}),
+            ("chunk_dispatch", {"chunk": 0, "total_chunks": 3, "file": "big.py", "agent": "rlm-subcall"}),
+            ("chunk_complete", {"chunk": 0, "total_chunks": 3, "count": 2}),
+            ("chunk_dispatch", {"chunk": 1, "total_chunks": 3, "file": "big.py", "agent": "rlm-subcall"}),
+            ("chunk_complete", {"chunk": 1, "total_chunks": 3, "count": 0}),
+            ("queries_suggested", {"count": 3}),
+            ("chunk_dispatch", {"chunk": 2, "total_chunks": 3, "file": "big.py", "agent": "rlm-subcall"}),
+            ("chunk_complete", {"chunk": 2, "total_chunks": 3, "count": 1}),
+            ("answer_found", {"summary": "Auth in middleware.py"}),
+            ("synthesis_start", {"count": 3}),
+            ("synthesis_complete", {"summary": "Auth handled via JWT middleware"}),
+        ]
+
+        for event, details in events:
+            data = json.dumps({"action": "progress", "event": event, "details": details}).encode()
+            resp = json.loads(handle_request(data, cache, project, stats=stats))
+            assert resp["ok"] is True
+
+        d = stats.to_dict()
+        assert d["progress_summary"]["sub_agent_dispatches"] == 3
+        assert d["progress_summary"]["chunks_analyzed"] == 3
+        assert d["progress_summary"]["answers_found"] == 1
+        assert d["progress_summary"]["analyses"] == 3
+        assert d["progress_summary"]["enrichments"] == 0
+        assert len(d["progress_events"]) == 12
+
+    def test_status_includes_progress(self, project):
+        """get_status response includes progress data after events."""
+        cache = SkeletonCache()
+        stats = SessionStats()
+        # Record a progress event
+        progress_data = json.dumps({
+            "action": "progress", "event": "chunk_dispatch",
+            "details": {"file": "main.py", "agent": "rlm-subcall", "chunk": 0, "total_chunks": 1}
+        }).encode()
+        handle_request(progress_data, cache, project, stats=stats)
+
+        # Now check status
+        status_data = json.dumps({"action": "status"}).encode()
+        resp = json.loads(handle_request(status_data, cache, project, stats=stats))
+        assert resp["session"]["progress_summary"]["sub_agent_dispatches"] == 1
+        assert resp["session"]["progress_last_event"]["event"] == "chunk_dispatch"
