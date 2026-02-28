@@ -10,6 +10,51 @@ import json
 import threading
 from typing import Optional
 
+# Lazy-loaded SDK modules (set when first used)
+anthropic = None
+openai = None
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def call_enrichment_api(prompt: str, config) -> Optional[str]:
+    """Dispatch enrichment call to the configured provider. Returns raw text or None."""
+    global anthropic, openai
+    provider = config.enrichment_provider
+    api_key = config.enrichment_api_key
+    model = config.enrichment_model
+
+    if not provider or not api_key or not model:
+        return None
+
+    if provider == "anthropic":
+        if anthropic is None:
+            import anthropic as _anthropic
+            anthropic = _anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+
+    elif provider in ("openai", "openrouter"):
+        if openai is None:
+            import openai as _openai
+            openai = _openai
+        base_url = OPENROUTER_BASE_URL if provider == "openrouter" else None
+        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content
+
+    return None
+
+
 # Haiku prompt template
 ENRICHMENT_PROMPT = """You are a code analyst. Given these code signatures from {filename}, provide a concise 1-line semantic summary for each symbol describing what it does (not what it is).
 
@@ -120,7 +165,7 @@ def merge_enrichments(skeleton: str, enrichments: dict[str, str]) -> str:
 
 
 async def enrich_file(file_path: str, skeleton: str, config) -> Optional[dict]:
-    """Call Haiku to generate enrichments for a file's skeleton.
+    """Call enrichment API to generate enrichments for a file's skeleton.
 
     Returns dict mapping symbol names to summaries, or None on failure.
     """
@@ -134,15 +179,10 @@ async def enrich_file(file_path: str, skeleton: str, config) -> Optional[dict]:
     prompt = build_enrichment_prompt(file_path, symbols)
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=config.anthropic_api_key)
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = response.content[0].text.strip()
-        # Parse JSON from response (may be wrapped in ```json blocks)
+        text = call_enrichment_api(prompt, config)
+        if text is None:
+            return None
+        text = text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0]
         return json.loads(text)
@@ -194,14 +234,10 @@ class EnrichmentWorker:
         prompt = build_enrichment_prompt(file_path, symbols)
 
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self._config.anthropic_api_key)
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = response.content[0].text.strip()
+            text = call_enrichment_api(prompt, self._config)
+            if text is None:
+                return True
+            text = text.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
             enrichments = json.loads(text)

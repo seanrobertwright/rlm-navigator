@@ -156,3 +156,94 @@ class TestEnrichmentWorker:
         worker.enqueue("test.py", "class Foo:  # L1-10\n", 1000.0)
 
         assert worker.queue_size == 0
+
+
+class TestCallEnrichmentApi:
+    """Tests for multi-provider dispatch."""
+
+    def test_anthropic_dispatch(self):
+        """Should call anthropic SDK for anthropic provider."""
+        from unittest.mock import MagicMock, patch
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = "anthropic"
+        mock_config.enrichment_model = "claude-haiku-4-5-20251001"
+        mock_config.enrichment_api_key = "sk-ant-test"
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"foo": "bar"}')]
+
+        with patch("node_enricher.anthropic") as mock_anthropic:
+            mock_client = MagicMock()
+            mock_client.messages.create.return_value = mock_response
+            mock_anthropic.Anthropic.return_value = mock_client
+
+            result = call_enrichment_api("test prompt", mock_config)
+            assert result == '{"foo": "bar"}'
+            mock_anthropic.Anthropic.assert_called_once_with(api_key="sk-ant-test")
+            mock_client.messages.create.assert_called_once_with(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "test prompt"}],
+            )
+
+    def test_openai_dispatch(self):
+        """Should call openai SDK for openai provider."""
+        from unittest.mock import MagicMock, patch
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = "openai"
+        mock_config.enrichment_model = "gpt-4o-mini"
+        mock_config.enrichment_api_key = "sk-test"
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"foo": "bar"}'
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        with patch("node_enricher.openai") as mock_openai:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_openai.OpenAI.return_value = mock_client
+
+            result = call_enrichment_api("test prompt", mock_config)
+            assert result == '{"foo": "bar"}'
+            mock_openai.OpenAI.assert_called_once_with(api_key="sk-test", base_url=None)
+
+    def test_openrouter_dispatch(self):
+        """Should call openai SDK with OpenRouter base_url."""
+        from unittest.mock import MagicMock, patch
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = "openrouter"
+        mock_config.enrichment_model = "anthropic/claude-haiku-4-5"
+        mock_config.enrichment_api_key = "sk-or-test"
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"foo": "bar"}'
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        with patch("node_enricher.openai") as mock_openai:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_openai.OpenAI.return_value = mock_client
+
+            result = call_enrichment_api("test prompt", mock_config)
+            assert result == '{"foo": "bar"}'
+            mock_openai.OpenAI.assert_called_once_with(
+                api_key="sk-or-test",
+                base_url="https://openrouter.ai/api/v1",
+            )
+
+    def test_none_provider_returns_none(self):
+        """Should return None for unknown/null provider."""
+        from unittest.mock import MagicMock
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = None
+        assert call_enrichment_api("test", mock_config) is None
