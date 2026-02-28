@@ -95,6 +95,48 @@ export function readLines(
 // PID helpers
 // ---------------------------------------------------------------------------
 
+export function formatProgressMessage(event: string, details: Record<string, any>): string {
+  const file = details.file || "unknown";
+  const agent = details.agent || "sub-agent";
+  const chunk = details.chunk;
+  const total = details.total_chunks;
+  const count = details.count;
+  const summary = details.summary;
+  const query = details.query;
+
+  const chunkLabel = chunk !== undefined && total !== undefined
+    ? `chunk ${chunk + 1}/${total}` : "";
+
+  switch (event) {
+    case "chunking_start":
+      return `[RLM] Chunking ${file}${query ? ` for: ${query}` : ""}...`;
+    case "chunking_complete":
+      return `[RLM] ${file} split into ${total} chunks`;
+    case "chunk_dispatch":
+      return `[RLM] Dispatching ${chunkLabel ? chunkLabel + " of " : ""}${file} to ${agent}...`;
+    case "chunk_complete": {
+      const parts = [`[RLM] ${chunkLabel ? chunkLabel + " " : ""}complete`];
+      if (count !== undefined) parts.push(`${count} relevant symbols found`);
+      if (summary) parts.push(summary);
+      return parts.join(" — ");
+    }
+    case "queries_suggested":
+      return `[RLM] ${count || 0} follow-up queries suggested`;
+    case "answer_found":
+      return `[RLM] Answer found${summary ? ": " + summary : ""}`;
+    case "synthesis_start":
+      return `[RLM] Synthesis starting — analyzing ${count || "?"} findings`;
+    case "synthesis_complete":
+      return `[RLM] Synthesis complete${summary ? ": " + summary : ""}`;
+    default:
+      return `[RLM] ${event}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PID helpers
+// ---------------------------------------------------------------------------
+
 export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);

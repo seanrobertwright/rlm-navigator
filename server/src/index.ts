@@ -23,6 +23,7 @@ import {
   formatStalenessWarning,
   readLines,
   isPidAlive,
+  formatProgressMessage,
 } from "./utils.js";
 
 const DAEMON_HOST = "127.0.0.1";
@@ -333,6 +334,20 @@ server.tool(
               line += `, ${data.tokens_avoided.toLocaleString()} avoided`;
             }
             text += `\n    ${name}${line}`;
+          }
+        }
+        if (status.session?.progress_summary) {
+          const p = status.session.progress_summary;
+          const total = p.sub_agent_dispatches;
+          if (total > 0) {
+            text += `\n\nSub-agent Activity:`;
+            text += `\n  Dispatches: ${total} (${p.analyses} chunk analysis, ${p.enrichments} enrichment)`;
+            text += `\n  Chunks analyzed: ${p.chunks_analyzed} | Answers found: ${p.answers_found}`;
+            if (status.session.progress_last_event) {
+              const last = status.session.progress_last_event;
+              const lastMsg = formatProgressMessage(last.event, last.details || {});
+              text += `\n  Last: ${lastMsg}`;
+            }
           }
         }
       }
@@ -927,6 +942,51 @@ server.tool(
         isError: true,
       };
     }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Progress Tracking
+// ---------------------------------------------------------------------------
+
+// --- rlm_progress ---
+server.tool(
+  "rlm_progress",
+  "Report sub-agent progress. Call this at each phase boundary during chunk-delegate-synthesize and enrichment workflows to provide visual feedback.",
+  {
+    event: z
+      .enum([
+        "chunking_start", "chunking_complete", "chunk_dispatch",
+        "chunk_complete", "synthesis_start", "synthesis_complete",
+        "answer_found", "queries_suggested",
+      ])
+      .describe("The progress event type"),
+    details: z
+      .object({
+        file: z.string().optional().describe("File being processed"),
+        agent: z.string().optional().describe("Sub-agent name (rlm-subcall or rlm-enricher)"),
+        chunk: z.number().int().optional().describe("Current chunk index (0-based)"),
+        total_chunks: z.number().int().optional().describe("Total chunks in batch"),
+        query: z.string().optional().describe("User query being investigated"),
+        count: z.number().int().optional().describe("Number of items (symbols, queries, etc.)"),
+        summary: z.string().optional().describe("Brief result summary"),
+      })
+      .default({})
+      .describe("Event details"),
+  },
+  async ({ event, details }) => {
+    const message = formatProgressMessage(event, details);
+
+    // Fire-and-forget to daemon — don't fail if daemon is down
+    try {
+      await queryDaemonWithRetry({ action: "progress", event, details }, 3000, 1);
+    } catch {
+      // Progress tracking is best-effort
+    }
+
+    return {
+      content: [{ type: "text" as const, text: message }],
+    };
   }
 );
 
