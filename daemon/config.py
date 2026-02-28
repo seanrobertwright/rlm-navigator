@@ -73,9 +73,11 @@ class RLMConfig:
 
     @property
     def enrichment_api_key(self) -> str | None:
-        if self._config_loaded and self._enrichment_api_key_env:
-            return os.environ.get(self._enrichment_api_key_env)
-        # Fallback
+        if self._config_loaded:
+            if self._enrichment_api_key_env:
+                return os.environ.get(self._enrichment_api_key_env)
+            return None  # Config loaded but no env var name -> no key
+        # Fallback: no config file, use ANTHROPIC_API_KEY directly
         return self.anthropic_api_key
 
     @property

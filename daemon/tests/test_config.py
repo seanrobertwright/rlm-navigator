@@ -146,9 +146,15 @@ class TestConfigFile:
                 "api_key_env": None
             }
         }))
-        from config import RLMConfig
-        cfg = RLMConfig(root=str(tmp_path))
-        assert cfg.enrichment_enabled is False
+        old = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            from config import RLMConfig
+            cfg = RLMConfig(root=str(tmp_path))
+            assert cfg.enrichment_enabled is False
+            assert cfg.enrichment_api_key is None
+        finally:
+            if old is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old
 
     def test_openrouter_provider(self, tmp_path):
         """OpenRouter provider should work with its own env var."""
