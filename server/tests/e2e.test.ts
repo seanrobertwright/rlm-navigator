@@ -210,4 +210,46 @@ describe("MCP ↔ Daemon E2E", () => {
     });
     expect(result.error).toBeDefined();
   });
+
+  test("malformed JSON returns error without crashing daemon", async () => {
+    // Send raw invalid bytes, then verify daemon is still alive
+    await new Promise<void>((resolve, reject) => {
+      const client = new net.Socket();
+      client.connect(port, "127.0.0.1", () => {
+        client.write("not valid json{{{");
+        client.end();
+      });
+      client.on("data", () => {});
+      client.on("end", () => resolve());
+      client.on("error", () => resolve()); // connection reset is OK
+      setTimeout(() => resolve(), 1000);
+    });
+
+    // Daemon should still be alive
+    const result = await tcpQuery(port, { action: "status" });
+    expect(result.status).toBe("alive");
+  });
+
+  test("missing action field returns error", async () => {
+    const result = await tcpQuery(port, { not_action: "status" } as any);
+    expect(result.error).toBeDefined();
+  });
+
+  test("concurrent queries all succeed", async () => {
+    const queries = Array.from({ length: 5 }, () =>
+      tcpQuery(port, { action: "status" })
+    );
+    const results = await Promise.all(queries);
+    for (const result of results) {
+      expect(result.status).toBe("alive");
+    }
+  });
+
+  test("queryDaemon to wrong port rejects with connection error", async () => {
+    // Use a port that's definitely not running
+    const freePort = await getFreeTcpPort();
+    await expect(
+      queryDaemon({ action: "status" }, 2000, freePort)
+    ).rejects.toThrow();
+  });
 });

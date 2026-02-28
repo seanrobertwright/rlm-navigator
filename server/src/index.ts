@@ -24,6 +24,13 @@ import {
   readLines,
   isPidAlive,
   formatProgressMessage,
+  toolError,
+  toolSuccess,
+  handleToolError,
+  checkDaemonResponse,
+  getDaemonPort as getDaemonPortFromRoot,
+  queryDaemon as queryDaemonDirect,
+  isConnectionError,
 } from "./utils.js";
 
 const DAEMON_HOST = "127.0.0.1";
@@ -51,44 +58,7 @@ const PROJECT_ROOT = resolveProjectRoot();
 let daemonChild: ChildProcess | null = null;
 
 function getDaemonPort(): number | null {
-  // 1. Env var override
-  if (process.env.RLM_DAEMON_PORT) {
-    return parseInt(process.env.RLM_DAEMON_PORT, 10);
-  }
-  // 2. Read .rlm/port file
-  try {
-    const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
-    const raw = fs.readFileSync(portFile, "utf-8").trim();
-
-    // Try JSON format first (new), fall back to plain number (legacy)
-    let port: number;
-    let pid: number | null = null;
-    try {
-      const parsed = JSON.parse(raw);
-      port = parsed.port;
-      pid = parsed.pid || null;
-    } catch {
-      port = parseInt(raw, 10);
-    }
-
-    if (isNaN(port)) return null;
-
-    // If we have a PID, check if it's still alive
-    if (pid !== null && !isPidAlive(pid)) {
-      // Stale port file — daemon is dead
-      try { fs.unlinkSync(portFile); } catch {}
-      return null;
-    }
-
-    return port;
-  } catch {
-    // File doesn't exist or unreadable — fall through
-  }
-  // 3. If .rlm/ exists, don't fall back to 9177 (would hit wrong daemon)
-  const rlmDir = path.join(PROJECT_ROOT, ".rlm");
-  if (fs.existsSync(rlmDir)) return null;
-  // 4. Legacy mode (no .rlm/) — use default port
-  return 9177;
+  return getDaemonPortFromRoot(PROJECT_ROOT, process.env.RLM_DAEMON_PORT);
 }
 
 let spawning = false;
@@ -172,41 +142,11 @@ process.on("exit", () => {
 // ---------------------------------------------------------------------------
 
 function queryDaemon(request: object, timeoutMs = 10000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const port = getDaemonPort();
-    if (port === null) {
-      reject(Object.assign(new Error("No daemon running for this project"), { code: "ECONNREFUSED" }));
-      return;
-    }
-    const client = new net.Socket();
-    let data = Buffer.alloc(0);
-    const timer = setTimeout(() => {
-      client.destroy();
-      reject(new Error("Daemon query timed out"));
-    }, timeoutMs);
-
-    client.connect(port, DAEMON_HOST, () => {
-      client.write(JSON.stringify(request));
-    });
-
-    client.on("data", (chunk) => {
-      data = Buffer.concat([data, chunk]);
-    });
-
-    client.on("end", () => {
-      clearTimeout(timer);
-      try {
-        resolve(JSON.parse(data.toString("utf-8")));
-      } catch {
-        resolve({ raw: data.toString("utf-8") });
-      }
-    });
-
-    client.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  });
+  const port = getDaemonPort();
+  if (port === null) {
+    return Promise.reject(Object.assign(new Error("No daemon running for this project"), { code: "ECONNREFUSED" }));
+  }
+  return queryDaemonDirect(request, timeoutMs, port);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -214,32 +154,40 @@ function sleep(ms: number): Promise<void> {
 }
 
 let daemonRootValidated = false;
+let validationPromise: Promise<void> | null = null;
 
 async function validateDaemonRoot(): Promise<void> {
   if (daemonRootValidated) return;
-  try {
-    const status = await queryDaemon({ action: "status" });
-    if (status.root) {
-      const daemonRoot = path.resolve(status.root);
-      const expectedRoot = path.resolve(PROJECT_ROOT);
-      if (daemonRoot !== expectedRoot) {
-        const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
-        try { fs.unlinkSync(portFile); } catch {}
-        daemonRootValidated = false;
-        spawnDaemon();
-        const ok = await waitForDaemon();
-        if (!ok) {
-          throw new Error(`Failed to start daemon for ${expectedRoot}`);
+  // If validation is already in progress, await the same promise
+  if (validationPromise) return validationPromise;
+  validationPromise = (async () => {
+    try {
+      const status = await queryDaemon({ action: "status" });
+      if (status.root) {
+        const daemonRoot = path.resolve(status.root);
+        const expectedRoot = path.resolve(PROJECT_ROOT);
+        if (daemonRoot !== expectedRoot) {
+          const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
+          try { fs.unlinkSync(portFile); } catch {}
+          daemonRootValidated = false;
+          spawnDaemon();
+          const ok = await waitForDaemon();
+          if (!ok) {
+            throw new Error(`Failed to start daemon for ${expectedRoot}`);
+          }
         }
       }
+      daemonRootValidated = true;
+    } catch (err) {
+      if (isConnectionError(err)) {
+        return;
+      }
+      throw err;
+    } finally {
+      validationPromise = null;
     }
-    daemonRootValidated = true;
-  } catch (err: any) {
-    if (err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED")) {
-      return;
-    }
-    throw err;
-  }
+  })();
+  return validationPromise;
 }
 
 async function queryDaemonWithRetry(request: object, timeoutMs = 10000, retries = 3): Promise<any> {
@@ -247,9 +195,8 @@ async function queryDaemonWithRetry(request: object, timeoutMs = 10000, retries 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       return await queryDaemon(request, timeoutMs);
-    } catch (err: any) {
-      const isConnRefused = err?.code === "ECONNREFUSED" || err?.message?.includes("ECONNREFUSED");
-      if (isConnRefused && attempt < retries - 1) {
+    } catch (err: unknown) {
+      if (isConnectionError(err) && attempt < retries - 1) {
         spawnDaemon();
         const ok = await waitForDaemon();
         if (!ok) {
@@ -398,30 +345,11 @@ server.tool(
         path: dirPath,
         max_depth,
       });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: truncateResponse(formatTree(result.tree, "")) + formatStats(result),
-          },
-        ],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Daemon error: ${err.message}. Is the daemon running?`,
-          },
-        ],
-        isError: true,
-      };
+      const err = checkDaemonResponse(result);
+      if (err) return err;
+      return toolSuccess(truncateResponse(formatTree(result.tree, "")) + formatStats(result));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -438,25 +366,11 @@ server.tool(
   async ({ path: filePath }) => {
     try {
       const result = await queryDaemonWithRetry({ action: "squeeze", path: filePath });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
-      return {
-        content: [{ type: "text" as const, text: truncateResponse(result.skeleton) + formatStats(result) }],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Daemon error: ${err.message}. Is the daemon running?`,
-          },
-        ],
-        isError: true,
-      };
+      const err = checkDaemonResponse(result);
+      if (err) return err;
+      return toolSuccess(truncateResponse(result.skeleton) + formatStats(result));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -475,47 +389,25 @@ server.tool(
   },
   async ({ path: filePath, symbol }) => {
     try {
-      // Ask daemon for line range
       const findResult = await queryDaemonWithRetry({
         action: "find",
         path: filePath,
         symbol,
       });
-      if (findResult.error) {
-        return {
-          content: [
-            { type: "text" as const, text: `Error: ${findResult.error}` },
-          ],
-          isError: true,
-        };
-      }
+      const err = checkDaemonResponse(findResult);
+      if (err) return err;
 
-      // Read those exact lines from the file
-      // Resolve relative to daemon root via status
       const status = await queryDaemonWithRetry({ action: "status" });
       const absPath = path.resolve(status.root, filePath);
       const code = readLines(absPath, findResult.start_line, findResult.end_line);
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: truncateResponse(
-              `# ${symbol} in ${filePath} (L${findResult.start_line}-${findResult.end_line})\n\n${code}`
-            ) + formatStats(findResult),
-          },
-        ],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${err.message}. Is the daemon running?`,
-          },
-        ],
-        isError: true,
-      };
+      return toolSuccess(
+        truncateResponse(
+          `# ${symbol} in ${filePath} (L${findResult.start_line}-${findResult.end_line})\n\n${code}`
+        ) + formatStats(findResult)
+      );
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -542,22 +434,11 @@ server.tool(
         query,
         path: dirPath,
       });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
+      const err = checkDaemonResponse(result);
+      if (err) return err;
 
       if (!result.results || result.results.length === 0) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `No matches found for "${query}" in ${dirPath || "project root"}`,
-            },
-          ],
-        };
+        return toolSuccess(`No matches found for "${query}" in ${dirPath || "project root"}`);
       }
 
       const output = result.results
@@ -567,26 +448,13 @@ server.tool(
         )
         .join("\n\n");
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: truncateResponse(
-              `Found "${query}" in ${result.results.length} file(s):\n\n${output}`
-            ) + formatStats(result),
-          },
-        ],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${err.message}. Is the daemon running?`,
-          },
-        ],
-        isError: true,
-      };
+      return toolSuccess(
+        truncateResponse(
+          `Found "${query}" in ${result.results.length} file(s):\n\n${output}`
+        ) + formatStats(result)
+      );
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -605,21 +473,12 @@ server.tool(
   async ({ path: filePath }) => {
     try {
       const result = await queryDaemonWithRetry({ action: "doc_map", path: filePath });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
+      const err = checkDaemonResponse(result);
+      if (err) return err;
       const treeText = JSON.stringify(result.tree, null, 2);
-      return {
-        content: [{ type: "text" as const, text: truncateResponse(treeText) + formatStats(result) }],
-      };
-    } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
-        isError: true,
-      };
+      return toolSuccess(truncateResponse(treeText) + formatStats(result));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -635,20 +494,11 @@ server.tool(
   async ({ path: filePath, section }) => {
     try {
       const result = await queryDaemonWithRetry({ action: "doc_drill", path: filePath, section });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
-      return {
-        content: [{ type: "text" as const, text: truncateResponse(result.content) + formatStats(result) }],
-      };
-    } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
-        isError: true,
-      };
+      const err = checkDaemonResponse(result);
+      if (err) return err;
+      return toolSuccess(truncateResponse(result.content) + formatStats(result));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -664,20 +514,11 @@ server.tool(
   async ({ query, context_summary }) => {
     try {
       const result = await queryDaemonWithRetry({ action: "assess", query, context_summary });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
-      return {
-        content: [{ type: "text" as const, text: result.assessment + formatStats(result) }],
-      };
-    } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
-        isError: true,
-      };
+      const err = checkDaemonResponse(result);
+      if (err) return err;
+      return toolSuccess(result.assessment + formatStats(result));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -698,29 +539,17 @@ server.tool(
   async ({ path: filePath }) => {
     try {
       const result = await queryDaemonWithRetry({ action: "chunks_list", path: filePath });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
+      const err = checkDaemonResponse(result);
+      if (err) return err;
       if (result.status === "pending") {
-        return {
-          content: [{ type: "text" as const, text: `Chunks for ${filePath} are still being generated. Try again shortly.` }],
-        };
+        return toolSuccess(`Chunks for ${filePath} are still being generated. Try again shortly.`);
       }
       const m = result.manifest;
-      return {
-        content: [{
-          type: "text" as const,
-          text: `${filePath}: ${m.total_chunks} chunks (${m.total_lines} lines, chunk_size=${m.chunk_size}, overlap=${m.overlap})` + formatStats(result),
-        }],
-      };
-    } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
-        isError: true,
-      };
+      return toolSuccess(
+        `${filePath}: ${m.total_chunks} chunks (${m.total_lines} lines, chunk_size=${m.chunk_size}, overlap=${m.overlap})` + formatStats(result)
+      );
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -742,21 +571,12 @@ server.tool(
   async ({ path: filePath, chunk: chunkIdx }) => {
     try {
       const result = await queryDaemonWithRetry({ action: "chunks_read", path: filePath, chunk: chunkIdx });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
+      const err = checkDaemonResponse(result);
+      if (err) return err;
       const header = `# ${filePath} chunk ${result.chunk}/${result.total_chunks - 1} (lines ${result.lines})\n\n`;
-      return {
-        content: [{ type: "text" as const, text: truncateResponse(header + result.content) + formatStats(result) }],
-      };
-    } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` }],
-        isError: true,
-      };
+      return toolSuccess(truncateResponse(header + result.content) + formatStats(result));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -773,27 +593,11 @@ server.tool(
   async () => {
     try {
       const result = await queryDaemonWithRetry({ action: "repl_init" });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: "REPL initialized. Helpers available: peek(), grep(), chunk_indices(), write_chunks(), add_buffer()",
-          },
-        ],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          { type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` },
-        ],
-        isError: true,
-      };
+      const err = checkDaemonResponse(result);
+      if (err) return err;
+      return toolSuccess("REPL initialized. Helpers available: peek(), grep(), chunk_indices(), write_chunks(), add_buffer()");
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -860,22 +664,13 @@ server.tool(
         return {
           content: [{ type: "text" as const, text: truncateResponse(text.trim()) }],
         };
-      } catch (err: any) {
-        // On TCP/connection errors, don't retry with timeout backoff — let queryDaemonWithRetry handle daemon respawn
-        return {
-          content: [
-            { type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` },
-          ],
-          isError: true,
-        };
+      } catch (err) {
+        return handleToolError(err);
       }
     }
 
     // Should not reach here, but safety fallback
-    return {
-      content: [{ type: "text" as const, text: "REPL execution failed after all retry attempts." }],
-      isError: true,
-    };
+    return toolError("REPL execution failed after all retry attempts.");
   }
 );
 
@@ -887,12 +682,8 @@ server.tool(
   async () => {
     try {
       const result = await queryDaemonWithRetry({ action: "repl_status" });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
+      const err = checkDaemonResponse(result);
+      if (err) return err;
       const lines = [
         `Variables: ${(result.variables || []).join(", ") || "(none)"}`,
         `Buffers: ${JSON.stringify(result.buffer_count || {})}`,
@@ -901,16 +692,9 @@ server.tool(
       if (result.staleness) {
         lines.push(formatStalenessWarning(result.staleness));
       }
-      return {
-        content: [{ type: "text" as const, text: lines.join("\n") }],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          { type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` },
-        ],
-        isError: true,
-      };
+      return toolSuccess(lines.join("\n"));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -923,22 +707,11 @@ server.tool(
   async () => {
     try {
       const result = await queryDaemonWithRetry({ action: "repl_reset" });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
-      return {
-        content: [{ type: "text" as const, text: "REPL state cleared." }],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          { type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` },
-        ],
-        isError: true,
-      };
+      const err = checkDaemonResponse(result);
+      if (err) return err;
+      return toolSuccess("REPL state cleared.");
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );
@@ -951,33 +724,20 @@ server.tool(
   async () => {
     try {
       const result = await queryDaemonWithRetry({ action: "repl_export_buffers" });
-      if (result.error) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-          isError: true,
-        };
-      }
+      const err = checkDaemonResponse(result);
+      if (err) return err;
       const buffers = result.buffers || {};
       if (Object.keys(buffers).length === 0) {
-        return {
-          content: [{ type: "text" as const, text: "No buffers accumulated." }],
-        };
+        return toolSuccess("No buffers accumulated.");
       }
       const output = Object.entries(buffers)
         .map(([key, texts]: [string, any]) => {
           return `## ${key} (${texts.length} entries)\n${texts.map((t: string, i: number) => `[${i}] ${t}`).join("\n")}`;
         })
         .join("\n\n");
-      return {
-        content: [{ type: "text" as const, text: truncateResponse(output) }],
-      };
-    } catch (err: any) {
-      return {
-        content: [
-          { type: "text" as const, text: `Daemon error: ${err.message}. Is the daemon running?` },
-        ],
-        isError: true,
-      };
+      return toolSuccess(truncateResponse(output));
+    } catch (err) {
+      return handleToolError(err);
     }
   }
 );

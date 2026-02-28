@@ -25,6 +25,7 @@ from squeezer import squeeze, find_symbol, supported_languages, _detect_language
 from rlm_repl import RLMRepl
 
 DEFAULT_PORT = 9177
+PORT_RANGE = (9177, 9196)  # Inclusive range for port scanning
 IGNORED_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv",
     "venv", ".env", "dist", "build", ".next", ".nuxt", "target",
@@ -202,15 +203,21 @@ class SkeletonCache:
             except OSError:
                 return None
 
-            if abs_path in self._cache and self._mtimes.get(abs_path) == mtime:
-                return self._cache[abs_path]
+            cached = self._cache.get(abs_path)
+            if cached is not None and self._mtimes.get(abs_path) == mtime:
+                return cached
 
         # Squeeze outside the lock to avoid blocking
         skeleton = squeeze(abs_path)
 
         with self._lock:
+            # Re-check mtime under lock to avoid caching stale data
+            try:
+                current_mtime = os.path.getmtime(abs_path)
+            except OSError:
+                return skeleton
             self._cache[abs_path] = skeleton
-            self._mtimes[abs_path] = mtime
+            self._mtimes[abs_path] = current_mtime
         return skeleton
 
     def invalidate(self, file_path: str):
@@ -333,8 +340,10 @@ class ChunkStore:
                 shutil.rmtree(chunk_dir)
             chunk_dir.parent.mkdir(parents=True, exist_ok=True)
             tmp_dir.rename(chunk_dir)
-        except Exception:
-            # Clean up temp on failure
+        except (OSError, ValueError) as e:
+            # Log and clean up temp on failure
+            import logging
+            logging.getLogger("rlm_daemon").warning("ChunkStore.chunk_file failed for %s: %s", abs_path_str, e)
             import shutil
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -370,7 +379,7 @@ class ChunkStore:
 
     def scan_all(self):
         """Walk project tree and chunk all text files. Respects IGNORED_DIRS."""
-        for dirpath, dirnames, filenames in os.walk(self.root):
+        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=False):
             dirnames[:] = [d for d in dirnames if d not in IGNORED_DIRS and not d.startswith(".")]
             for fname in filenames:
                 fpath = os.path.join(dirpath, fname)
@@ -454,6 +463,9 @@ def build_tree(dir_path: str, root: str, max_depth: int = 4) -> list[dict]:
 
     for item in items:
         if item.name in IGNORED_DIRS or item.name.startswith("."):
+            continue
+        # Skip symlinks to prevent infinite loops
+        if item.is_symlink():
             continue
 
         rel = str(item.resolve().relative_to(root_path)).replace("\\", "/")
@@ -850,7 +862,7 @@ def handle_client(conn: socket.socket, cache: SkeletonCache, root: str, repl: RL
             try:
                 json.loads(data)
                 break
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
 
         if not data:
@@ -931,7 +943,8 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     bound_port = None
-    for try_port in range(port, port + 20):
+    max_port = PORT_RANGE[1] - PORT_RANGE[0] + 1
+    for try_port in range(port, port + max_port):
         try:
             server.bind(("127.0.0.1", try_port))
             bound_port = try_port
@@ -939,7 +952,7 @@ def run_server(root: str, port: int, idle_timeout: int = 300):
         except OSError:
             continue
     if bound_port is None:
-        print(f"Error: Could not bind to any port in range {port}-{port + 19}", file=sys.stderr)
+        print(f"Error: Could not bind to any port in range {port}-{port + max_port - 1}", file=sys.stderr)
         observer.stop()
         observer.join()
         sys.exit(1)

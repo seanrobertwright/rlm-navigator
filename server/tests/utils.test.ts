@@ -13,6 +13,14 @@ import {
   readLines,
   getDaemonPort,
   formatProgressMessage,
+  toolError,
+  toolSuccess,
+  handleToolError,
+  checkDaemonResponse,
+  readPortFile,
+  isConnectionError,
+  queryDaemon,
+  DAEMON_PORT_RANGE,
 } from "../src/utils.js";
 
 // ---------------------------------------------------------------------------
@@ -294,5 +302,186 @@ describe("formatProgressMessage", () => {
   test("unknown event fallback", () => {
     const msg = formatProgressMessage("custom_event", {});
     expect(msg).toBe("[RLM] custom_event");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toolError / toolSuccess / handleToolError / checkDaemonResponse
+// ---------------------------------------------------------------------------
+
+describe("toolError", () => {
+  test("returns error response with isError flag", () => {
+    const resp = toolError("something broke");
+    expect(resp.isError).toBe(true);
+    expect(resp.content[0].type).toBe("text");
+    expect(resp.content[0].text).toBe("something broke");
+  });
+});
+
+describe("toolSuccess", () => {
+  test("returns success response without isError", () => {
+    const resp = toolSuccess("all good");
+    expect(resp.isError).toBeUndefined();
+    expect(resp.content[0].text).toBe("all good");
+  });
+});
+
+describe("handleToolError", () => {
+  test("wraps Error instance", () => {
+    const resp = handleToolError(new Error("connection lost"));
+    expect(resp.isError).toBe(true);
+    expect(resp.content[0].text).toContain("connection lost");
+    expect(resp.content[0].text).toContain("Is the daemon running?");
+  });
+
+  test("wraps non-Error value", () => {
+    const resp = handleToolError("string error");
+    expect(resp.content[0].text).toContain("string error");
+  });
+});
+
+describe("checkDaemonResponse", () => {
+  test("returns null for successful response", () => {
+    expect(checkDaemonResponse({ status: "alive" })).toBeNull();
+  });
+
+  test("returns error response when result has error", () => {
+    const resp = checkDaemonResponse({ error: "file not found" });
+    expect(resp).not.toBeNull();
+    expect(resp!.isError).toBe(true);
+    expect(resp!.content[0].text).toContain("file not found");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readPortFile
+// ---------------------------------------------------------------------------
+
+describe("readPortFile", () => {
+  test("reads JSON port file with live PID", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rlm-test-"));
+    const rlmDir = path.join(tmpDir, ".rlm");
+    fs.mkdirSync(rlmDir);
+    fs.writeFileSync(
+      path.join(rlmDir, "port"),
+      JSON.stringify({ port: 9180, pid: process.pid })
+    );
+
+    const data = readPortFile(tmpDir);
+    expect(data).not.toBeNull();
+    expect(data!.port).toBe(9180);
+    expect(data!.pid).toBe(process.pid);
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  test("reads legacy plain-text port file", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rlm-test-"));
+    const rlmDir = path.join(tmpDir, ".rlm");
+    fs.mkdirSync(rlmDir);
+    fs.writeFileSync(path.join(rlmDir, "port"), "9185");
+
+    const data = readPortFile(tmpDir);
+    expect(data).not.toBeNull();
+    expect(data!.port).toBe(9185);
+    expect(data!.pid).toBeNull();
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns null when port file missing", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rlm-test-"));
+    fs.mkdirSync(path.join(tmpDir, ".rlm"));
+    expect(readPortFile(tmpDir)).toBeNull();
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns null and cleans up stale PID", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rlm-test-"));
+    const rlmDir = path.join(tmpDir, ".rlm");
+    fs.mkdirSync(rlmDir);
+    const portFile = path.join(rlmDir, "port");
+    fs.writeFileSync(portFile, JSON.stringify({ port: 9190, pid: 999999999 }));
+
+    expect(readPortFile(tmpDir)).toBeNull();
+    expect(fs.existsSync(portFile)).toBe(false);
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns null for invalid content", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rlm-test-"));
+    const rlmDir = path.join(tmpDir, ".rlm");
+    fs.mkdirSync(rlmDir);
+    fs.writeFileSync(path.join(rlmDir, "port"), "not-a-number");
+
+    expect(readPortFile(tmpDir)).toBeNull();
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isConnectionError
+// ---------------------------------------------------------------------------
+
+describe("isConnectionError", () => {
+  test("returns true for ECONNREFUSED", () => {
+    const err = Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" });
+    expect(isConnectionError(err)).toBe(true);
+  });
+
+  test("returns true for ECONNRESET", () => {
+    const err = Object.assign(new Error("reset"), { code: "ECONNRESET" });
+    expect(isConnectionError(err)).toBe(true);
+  });
+
+  test("returns true for EPIPE", () => {
+    const err = Object.assign(new Error("pipe"), { code: "EPIPE" });
+    expect(isConnectionError(err)).toBe(true);
+  });
+
+  test("returns false for other errors", () => {
+    expect(isConnectionError(new Error("generic"))).toBe(false);
+    expect(isConnectionError("string")).toBe(false);
+    expect(isConnectionError(null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// queryDaemon error paths
+// ---------------------------------------------------------------------------
+
+describe("queryDaemon", () => {
+  test("rejects when no port specified", async () => {
+    await expect(queryDaemon({ action: "status" })).rejects.toThrow("No daemon port specified");
+  });
+
+  test("rejects on connection refused to closed port", async () => {
+    await expect(queryDaemon({ action: "status" }, 1000, 1)).rejects.toThrow();
+  });
+
+  test("times out on unresponsive connection", async () => {
+    // Create a server that accepts but never responds
+    const netMod = await import("node:net");
+    const srv = netMod.createServer(() => {});
+    await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", () => resolve()));
+    const addr = srv.address() as import("node:net").AddressInfo;
+    try {
+      await expect(queryDaemon({ action: "status" }, 200, addr.port)).rejects.toThrow("timed out");
+    } finally {
+      srv.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DAEMON_PORT_RANGE constant
+// ---------------------------------------------------------------------------
+
+describe("DAEMON_PORT_RANGE", () => {
+  test("has correct range", () => {
+    expect(DAEMON_PORT_RANGE.start).toBe(9177);
+    expect(DAEMON_PORT_RANGE.end).toBe(9196);
   });
 });

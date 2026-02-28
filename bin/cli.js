@@ -113,6 +113,141 @@ function run(cmd, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared Setup Helpers (used by install + update)
+// ---------------------------------------------------------------------------
+
+function checkPython() {
+  let spinner = step("Checking Python availability...");
+  const python = findPython();
+  if (!python) {
+    spinner.fail("Python not found");
+    errorBox("Python 3.8+ required", "Install Python and ensure 'python' or 'python3' is on PATH.");
+    process.exit(1);
+  }
+  spinner.succeed(`Python found (${chalk.dim(python)})`);
+  return python;
+}
+
+function copySourceFiles() {
+  let spinner = step("Copying daemon, server, and skills...");
+  try {
+    copyDirSync(path.join(PKG_ROOT, "daemon"), path.join(RLM_DIR, "daemon"));
+    copyDirSync(path.join(PKG_ROOT, "server"), path.join(RLM_DIR, "server"));
+
+    const srcSkills = path.join(PKG_ROOT, ".claude", "skills");
+    const srcAgents = path.join(PKG_ROOT, ".claude", "agents");
+    const destClaude = path.join(CWD, ".claude");
+    if (fs.existsSync(srcSkills)) {
+      copyDirSync(srcSkills, path.join(destClaude, "skills"));
+    }
+    if (fs.existsSync(srcAgents)) {
+      copyDirSync(srcAgents, path.join(destClaude, "agents"));
+    }
+    spinner.succeed("Files copied");
+  } catch (err) {
+    spinner.fail("Failed to copy files");
+    errorBox("Copy failed", err.message);
+    process.exit(1);
+  }
+}
+
+function installPythonDeps(python, { strict = true } = {}) {
+  let spinner = step("Installing Python dependencies...");
+  const reqFile = path.join(RLM_DIR, "daemon", "requirements.txt");
+  const result = run(`${python} -m pip install -r "${reqFile}"`);
+  if (!result.ok) {
+    if (strict) {
+      spinner.fail("Failed to install Python dependencies");
+      if (result.stderr) console.log(chalk.dim(result.stderr));
+      process.exit(1);
+    } else {
+      spinner.warn("Python deps may have issues");
+      if (result.stderr) console.log(chalk.dim(result.stderr));
+      return;
+    }
+  }
+  spinner.succeed("Python dependencies installed");
+}
+
+function buildMcpServer() {
+  let spinner = step("Building MCP server...");
+  let result = run("npm install", { cwd: path.join(RLM_DIR, "server") });
+  if (!result.ok) {
+    spinner.fail("npm install failed");
+    if (result.stderr) console.log(chalk.dim(result.stderr));
+    process.exit(1);
+  }
+  result = run("npm run build", { cwd: path.join(RLM_DIR, "server") });
+  if (!result.ok) {
+    spinner.fail("MCP server build failed");
+    if (result.stderr) console.log(chalk.dim(result.stderr));
+    process.exit(1);
+  }
+  spinner.succeed("MCP server built");
+}
+
+function integrateClaudeMd({ replaceExisting = false } = {}) {
+  let spinner = step(replaceExisting ? "Updating CLAUDE.md..." : "Integrating CLAUDE.md...");
+  const snippetPath = path.join(PKG_ROOT, "templates", "CLAUDE_SNIPPET.md");
+  const snippet = fs.readFileSync(snippetPath, "utf-8");
+  const claudeMdPath = path.join(CWD, "CLAUDE.md");
+
+  if (!fs.existsSync(claudeMdPath)) {
+    fs.writeFileSync(claudeMdPath, snippet);
+    spinner.succeed("Created CLAUDE.md");
+  } else {
+    const existing = fs.readFileSync(claudeMdPath, "utf-8");
+    if (existing.includes("<!-- rlm-navigator:start -->")) {
+      if (replaceExisting) {
+        const updated = existing.replace(
+          /<!-- rlm-navigator:start -->[\s\S]*?<!-- rlm-navigator:end -->\n?/,
+          snippet
+        );
+        fs.writeFileSync(claudeMdPath, updated);
+        spinner.succeed("CLAUDE.md snippet replaced");
+      } else {
+        spinner.succeed("CLAUDE.md already configured");
+      }
+    } else {
+      fs.writeFileSync(claudeMdPath, snippet + "\n" + existing);
+      spinner.succeed("Updated CLAUDE.md");
+    }
+  }
+}
+
+function registerMcpServer() {
+  let spinner = step("Registering MCP server with Claude Code...");
+  const mcpServerPath = path.join(RLM_DIR, "server", "build", "index.js");
+  const claudeAvailable = spawnSync("claude", ["--version"], { stdio: "pipe" }).status === 0;
+
+  if (claudeAvailable) {
+    const result = run(`claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`);
+    if (result.ok) {
+      spinner.succeed("MCP server registered");
+    } else {
+      spinner.warn("Auto-registration failed");
+      console.log(chalk.dim("  Run manually:"));
+      console.log(chalk.dim(`  claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`));
+    }
+    return claudeAvailable;
+  } else {
+    spinner.warn("Claude CLI not found — register manually:");
+    console.log(chalk.dim(`  claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`));
+    return false;
+  }
+}
+
+function registerHook() {
+  let spinner = step("Registering session-end hook...");
+  try {
+    installHook();
+    spinner.succeed("Session-end hook registered");
+  } catch (err) {
+    spinner.warn("Hook registration failed: " + err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Daemon Lifecycle Helpers
 // ---------------------------------------------------------------------------
 
@@ -269,89 +404,14 @@ async function install() {
     spinner.succeed("Existing daemon stopped");
   }
 
-  // Pre-flight: Python
-  let spinner = step("Checking Python availability...");
-  const python = findPython();
-  if (!python) {
-    spinner.fail("Python not found");
-    errorBox(
-      "Python 3.8+ required",
-      "Install Python and ensure 'python' or 'python3' is on PATH."
-    );
-    process.exit(1);
-  }
-  spinner.succeed(`Python found (${chalk.dim(python)})`);
+  const python = checkPython();
+  copySourceFiles();
+  installPythonDeps(python);
+  buildMcpServer();
+  integrateClaudeMd();
 
-  // 1. Copy files
-  spinner = step("Copying daemon, server, and skills...");
-  try {
-    copyDirSync(path.join(PKG_ROOT, "daemon"), path.join(RLM_DIR, "daemon"));
-    copyDirSync(path.join(PKG_ROOT, "server"), path.join(RLM_DIR, "server"));
-
-    const srcSkills = path.join(PKG_ROOT, ".claude", "skills");
-    const srcAgents = path.join(PKG_ROOT, ".claude", "agents");
-    const destClaude = path.join(CWD, ".claude");
-    if (fs.existsSync(srcSkills)) {
-      copyDirSync(srcSkills, path.join(destClaude, "skills"));
-    }
-    if (fs.existsSync(srcAgents)) {
-      copyDirSync(srcAgents, path.join(destClaude, "agents"));
-    }
-    spinner.succeed("Files copied");
-  } catch (err) {
-    spinner.fail("Failed to copy files");
-    errorBox("Copy failed", err.message);
-    process.exit(1);
-  }
-
-  // 2. Python deps
-  spinner = step("Installing Python dependencies...");
-  const reqFile = path.join(RLM_DIR, "daemon", "requirements.txt");
-  let result = run(`${python} -m pip install -r "${reqFile}"`);
-  if (!result.ok) {
-    spinner.fail("Failed to install Python dependencies");
-    if (result.stderr) console.log(chalk.dim(result.stderr));
-    process.exit(1);
-  }
-  spinner.succeed("Python dependencies installed");
-
-  // 3. Build MCP server
-  spinner = step("Building MCP server...");
-  result = run("npm install", { cwd: path.join(RLM_DIR, "server") });
-  if (!result.ok) {
-    spinner.fail("npm install failed");
-    if (result.stderr) console.log(chalk.dim(result.stderr));
-    process.exit(1);
-  }
-  result = run("npm run build", { cwd: path.join(RLM_DIR, "server") });
-  if (!result.ok) {
-    spinner.fail("MCP server build failed");
-    if (result.stderr) console.log(chalk.dim(result.stderr));
-    process.exit(1);
-  }
-  spinner.succeed("MCP server built");
-
-  // 4. CLAUDE.md
-  spinner = step("Integrating CLAUDE.md...");
-  const snippetPath = path.join(PKG_ROOT, "templates", "CLAUDE_SNIPPET.md");
-  const snippet = fs.readFileSync(snippetPath, "utf-8");
-  const claudeMdPath = path.join(CWD, "CLAUDE.md");
-
-  if (!fs.existsSync(claudeMdPath)) {
-    fs.writeFileSync(claudeMdPath, snippet);
-    spinner.succeed("Created CLAUDE.md");
-  } else {
-    const existing = fs.readFileSync(claudeMdPath, "utf-8");
-    if (existing.includes("<!-- rlm-navigator:start -->")) {
-      spinner.succeed("CLAUDE.md already configured");
-    } else {
-      fs.writeFileSync(claudeMdPath, snippet + "\n" + existing);
-      spinner.succeed("Updated CLAUDE.md");
-    }
-  }
-
-  // 5. .gitignore prompt
-  spinner = step("Checking .gitignore...");
+  // .gitignore prompt (install-only)
+  let spinner = step("Checking .gitignore...");
   spinner.stop();
   const answer = await ask(chalk.cyan("  ? ") + "Add .rlm/ to .gitignore? " + chalk.dim("[Y/n] "));
   spinner = step("Updating .gitignore...");
@@ -374,33 +434,8 @@ async function install() {
     spinner.info("Skipped .gitignore");
   }
 
-  // 6. Register MCP server
-  spinner = step("Registering MCP server with Claude Code...");
-  const mcpServerPath = path.join(RLM_DIR, "server", "build", "index.js");
-  const claudeAvailable = spawnSync("claude", ["--version"], { stdio: "pipe" }).status === 0;
-
-  if (claudeAvailable) {
-    result = run(`claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`);
-    if (result.ok) {
-      spinner.succeed("MCP server registered");
-    } else {
-      spinner.warn("Auto-registration failed");
-      console.log(chalk.dim("  Run manually:"));
-      console.log(chalk.dim(`  claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`));
-    }
-  } else {
-    spinner.warn("Claude CLI not found — register manually:");
-    console.log(chalk.dim(`  claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`));
-  }
-
-  // 7. Register SessionEnd hook
-  spinner = step("Registering session-end hook...");
-  try {
-    installHook();
-    spinner.succeed("Session-end hook registered");
-  } catch (err) {
-    spinner.warn("Hook registration failed: " + err.message);
-  }
+  registerMcpServer();
+  registerHook();
 
   successBox([
     chalk.bold.green("Installation complete!"),
@@ -422,91 +457,19 @@ function update() {
     process.exit(1);
   }
 
-  let spinner = step("Checking Python...");
-  const python = findPython();
-  if (!python) {
-    spinner.fail("Python not found");
-    errorBox("Python 3.8+ required", "Install Python and ensure it's on PATH.");
-    process.exit(1);
-  }
-  spinner.succeed(`Python found (${chalk.dim(python)})`);
+  const python = checkPython();
+  copySourceFiles();
+  installPythonDeps(python, { strict: false });
+  buildMcpServer();
+  integrateClaudeMd({ replaceExisting: true });
 
-  // 1. Copy source files
-  spinner = step("Updating daemon and server source files...");
-  copyDirSync(path.join(PKG_ROOT, "daemon"), path.join(RLM_DIR, "daemon"));
-  copyDirSync(path.join(PKG_ROOT, "server"), path.join(RLM_DIR, "server"));
-  spinner.succeed("Source files updated");
-
-  // 2. Skills and agents
-  spinner = step("Updating skill and agent files...");
-  const srcSkills = path.join(PKG_ROOT, ".claude", "skills");
-  const srcAgents = path.join(PKG_ROOT, ".claude", "agents");
-  const destClaude = path.join(CWD, ".claude");
-  if (fs.existsSync(srcSkills)) {
-    copyDirSync(srcSkills, path.join(destClaude, "skills"));
-  }
-  if (fs.existsSync(srcAgents)) {
-    copyDirSync(srcAgents, path.join(destClaude, "agents"));
-  }
-  spinner.succeed("Skills and agents updated");
-
-  // 3. Deps and rebuild
-  spinner = step("Installing dependencies...");
-  const reqFile = path.join(RLM_DIR, "daemon", "requirements.txt");
-  let result = run(`${python} -m pip install -r "${reqFile}"`);
-  if (!result.ok) {
-    spinner.warn("Python deps may have issues");
-    if (result.stderr) console.log(chalk.dim(result.stderr));
-  } else {
-    spinner.succeed("Python dependencies installed");
-  }
-
-  spinner = step("Building MCP server...");
-  result = run("npm install", { cwd: path.join(RLM_DIR, "server") });
-  if (!result.ok) {
-    spinner.fail("npm install failed");
-    if (result.stderr) console.log(chalk.dim(result.stderr));
-    process.exit(1);
-  }
-  result = run("npm run build", { cwd: path.join(RLM_DIR, "server") });
-  if (!result.ok) {
-    spinner.fail("MCP server build failed");
-    if (result.stderr) console.log(chalk.dim(result.stderr));
-    process.exit(1);
-  }
-  spinner.succeed("MCP server built");
-
-  // 4. CLAUDE.md
-  spinner = step("Updating CLAUDE.md...");
-  const snippetPath = path.join(PKG_ROOT, "templates", "CLAUDE_SNIPPET.md");
-  const snippet = fs.readFileSync(snippetPath, "utf-8");
-  const claudeMdPath = path.join(CWD, "CLAUDE.md");
-
-  if (!fs.existsSync(claudeMdPath)) {
-    fs.writeFileSync(claudeMdPath, snippet);
-    spinner.succeed("Created CLAUDE.md");
-  } else {
-    const existing = fs.readFileSync(claudeMdPath, "utf-8");
-    if (existing.includes("<!-- rlm-navigator:start -->")) {
-      const updated = existing.replace(
-        /<!-- rlm-navigator:start -->[\s\S]*?<!-- rlm-navigator:end -->\n?/,
-        snippet
-      );
-      fs.writeFileSync(claudeMdPath, updated);
-      spinner.succeed("CLAUDE.md snippet replaced");
-    } else {
-      fs.writeFileSync(claudeMdPath, snippet + "\n" + existing);
-      spinner.succeed("CLAUDE.md updated");
-    }
-  }
-
-  // 5. Migrate MCP registration
+  // Migrate MCP registration (update-only: remove user scope first)
   const claudeAvailable = spawnSync("claude", ["--version"], { stdio: "pipe" }).status === 0;
   if (claudeAvailable) {
-    spinner = step("Ensuring project-scoped MCP registration...");
-    const mcpServerPath = path.join(RLM_DIR, "server", "build", "index.js");
+    let spinner = step("Ensuring project-scoped MCP registration...");
     run("claude mcp remove rlm-navigator --scope user");
-    result = run(`claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`);
+    const mcpServerPath = path.join(RLM_DIR, "server", "build", "index.js");
+    const result = run(`claude mcp add rlm-navigator --scope project -- node "${mcpServerPath}"`);
     if (result.ok) {
       spinner.succeed("MCP registration updated");
     } else {
@@ -514,14 +477,7 @@ function update() {
     }
   }
 
-  // 6. Re-register hook (idempotent)
-  spinner = step("Updating session-end hook...");
-  try {
-    installHook();
-    spinner.succeed("Session-end hook updated");
-  } catch (err) {
-    spinner.warn("Hook update failed: " + err.message);
-  }
+  registerHook();
 
   successBox([
     chalk.bold.green("Update complete!"),

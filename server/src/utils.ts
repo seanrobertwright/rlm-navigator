@@ -8,6 +8,54 @@
 import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ProgressDetails } from "./types.js";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+export const DAEMON_PORT_RANGE = { start: 9177, end: 9196 } as const;
+
+// ---------------------------------------------------------------------------
+// MCP tool response helpers
+// ---------------------------------------------------------------------------
+
+interface McpTextContent {
+  type: "text";
+  text: string;
+  [key: string]: unknown;
+}
+
+interface McpToolResponse {
+  content: McpTextContent[];
+  isError?: boolean;
+  [key: string]: unknown;
+}
+
+export function toolError(message: string): McpToolResponse {
+  return {
+    content: [{ type: "text" as const, text: message }],
+    isError: true,
+  };
+}
+
+export function toolSuccess(text: string): McpToolResponse {
+  return {
+    content: [{ type: "text" as const, text }],
+  };
+}
+
+export function handleToolError(err: unknown): McpToolResponse {
+  const message = err instanceof Error ? err.message : String(err);
+  return toolError(`Daemon error: ${message}. Is the daemon running?`);
+}
+
+export function checkDaemonResponse(result: Record<string, unknown>): McpToolResponse | null {
+  if (result.error) {
+    return toolError(`Error: ${result.error}`);
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Output truncation
@@ -95,7 +143,7 @@ export function readLines(
 // PID helpers
 // ---------------------------------------------------------------------------
 
-export function formatProgressMessage(event: string, details: Record<string, any>): string {
+export function formatProgressMessage(event: string, details: ProgressDetails): string {
   const file = details.file || "unknown";
   const agent = details.agent || "sub-agent";
   const chunk = details.chunk;
@@ -137,6 +185,12 @@ export function formatProgressMessage(event: string, details: Record<string, any
 // PID helpers
 // ---------------------------------------------------------------------------
 
+export function isConnectionError(err: unknown): err is NodeJS.ErrnoException {
+  if (!(err instanceof Error)) return false;
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EPIPE";
+}
+
 export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -150,22 +204,27 @@ export function isPidAlive(pid: number): boolean {
 // Port discovery
 // ---------------------------------------------------------------------------
 
-export function getDaemonPort(projectRoot: string, envPort?: string): number | null {
-  // 1. Env var override
-  if (envPort) {
-    return parseInt(envPort, 10);
-  }
-  // 2. Read .rlm/port file
+export interface PortFileData {
+  port: number;
+  pid: number | null;
+}
+
+export function readPortFile(projectRoot: string): PortFileData | null {
+  const portFile = path.join(projectRoot, ".rlm", "port");
   try {
-    const portFile = path.join(projectRoot, ".rlm", "port");
     const raw = fs.readFileSync(portFile, "utf-8").trim();
 
     let port: number;
     let pid: number | null = null;
     try {
       const parsed = JSON.parse(raw);
-      port = parsed.port;
-      pid = parsed.pid || null;
+      if (typeof parsed === "object" && parsed !== null) {
+        port = parsed.port;
+        pid = parsed.pid || null;
+      } else {
+        // JSON.parse("9185") yields a number — treat as plain port
+        port = Number(parsed);
+      }
     } catch {
       port = parseInt(raw, 10);
     }
@@ -178,10 +237,20 @@ export function getDaemonPort(projectRoot: string, envPort?: string): number | n
       return null;
     }
 
-    return port;
+    return { port, pid };
   } catch {
-    // File doesn't exist
+    return null;
   }
+}
+
+export function getDaemonPort(projectRoot: string, envPort?: string): number | null {
+  // 1. Env var override
+  if (envPort) {
+    return parseInt(envPort, 10);
+  }
+  // 2. Read .rlm/port file
+  const portData = readPortFile(projectRoot);
+  if (portData) return portData.port;
   // 3. If .rlm/ exists, don't fall back (would hit wrong daemon)
   const rlmDir = path.join(projectRoot, ".rlm");
   if (fs.existsSync(rlmDir)) return null;
@@ -197,7 +266,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export function queryDaemon(request: object, timeoutMs = 10000, port?: number): Promise<any> {
+export function queryDaemon<T = Record<string, unknown>>(request: object, timeoutMs = 10000, port?: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const targetPort = port ?? null;
     if (targetPort === null) {
@@ -224,7 +293,7 @@ export function queryDaemon(request: object, timeoutMs = 10000, port?: number): 
       try {
         resolve(JSON.parse(data.toString("utf-8")));
       } catch {
-        resolve({ raw: data.toString("utf-8") });
+        resolve({ raw: data.toString("utf-8") } as unknown as T);
       }
     });
 

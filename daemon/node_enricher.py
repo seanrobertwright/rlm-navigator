@@ -150,20 +150,28 @@ async def enrich_file(file_path: str, skeleton: str, config) -> Optional[dict]:
         return None
 
 
+MAX_ENRICHMENT_QUEUE = 500
+
+
 class EnrichmentWorker:
     """Background worker that processes files for enrichment."""
 
     def __init__(self, cache: EnrichmentCache, config=None):
         self._cache = cache
         self._config = config
-        self._queue: queue.Queue = queue.Queue()
+        self._queue: queue.Queue = queue.Queue(maxsize=MAX_ENRICHMENT_QUEUE)
         self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
 
     def enqueue(self, file_path: str, skeleton: str, mtime: float) -> None:
-        """Add a file to the enrichment queue."""
+        """Add a file to the enrichment queue. Drops silently if queue is full."""
         if self._cache.get(file_path, mtime) is not None:
             return
-        self._queue.put((file_path, skeleton, mtime))
+        try:
+            self._queue.put_nowait((file_path, skeleton, mtime))
+        except queue.Full:
+            pass  # Drop oldest-style: queue is bounded, skip new items
 
     @property
     def queue_size(self) -> int:
@@ -208,14 +216,25 @@ class EnrichmentWorker:
         if self._running:
             return
         self._running = True
-        t = threading.Thread(target=self._run_loop, daemon=True)
-        t.start()
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
 
     def _run_loop(self) -> None:
-        import time
-        while self._running:
+        while not self._stop_event.is_set():
             if not self.process_one():
-                time.sleep(1)
+                self._stop_event.wait(timeout=1)
 
     def stop(self) -> None:
+        """Stop the worker and drain remaining queue items."""
         self._running = False
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
+        # Drain remaining items to avoid memory leak
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break

@@ -9,6 +9,9 @@ try:
 except ImportError:
     pass
 
+# Sentinel for "not yet checked"
+_UNCHECKED = object()
+
 
 class RLMConfig:
     """Centralized configuration. Reads from environment variables."""
@@ -17,6 +20,8 @@ class RLMConfig:
         self.anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")
         self.openai_api_key: str | None = os.environ.get("CHATGPT_API_KEY")
         self.pageindex_model: str = os.environ.get("PAGEINDEX_MODEL", "gpt-4o-2024-11-20")
+        self._pageindex_available = _UNCHECKED
+        self._anthropic_available = _UNCHECKED
 
     @property
     def enrichment_enabled(self) -> bool:
@@ -30,16 +35,20 @@ class RLMConfig:
 
     @property
     def pageindex_available(self) -> bool:
-        try:
-            import pageindex  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        if self._pageindex_available is _UNCHECKED:
+            try:
+                import pageindex  # noqa: F401
+                self._pageindex_available = True
+            except ImportError:
+                self._pageindex_available = False
+        return self._pageindex_available
 
     @property
     def anthropic_available(self) -> bool:
-        try:
-            import anthropic  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        if self._anthropic_available is _UNCHECKED:
+            try:
+                import anthropic  # noqa: F401
+                self._anthropic_available = True
+            except ImportError:
+                self._anthropic_available = False
+        return self._anthropic_available
