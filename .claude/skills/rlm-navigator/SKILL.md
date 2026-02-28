@@ -61,6 +61,8 @@ For large directories with many files, delegate to the `rlm-subcall` agent:
 - It will identify which files are relevant
 - You then `rlm_map` only those files
 
+**Progress reporting is MANDATORY** — call `rlm_progress` at every phase boundary (see below).
+
 ## REPL-Assisted Analysis
 
 For multi-step analysis that builds on previous findings:
@@ -98,31 +100,67 @@ Retrieves all accumulated buffers for synthesis.
 
 ## Chunk-Delegate-Synthesize Workflow
 
-For large files or cross-file analysis, use the chunk-delegate pattern:
+For large files or cross-file analysis, use the chunk-delegate pattern with **mandatory progress reporting**:
 
 ### 1. Chunk via REPL
 ```
+rlm_progress(event="chunking_start", details={file: "src/large_module.py", query: "<user's question>"})
 rlm_repl_exec code="paths = write_chunks('src/large_module.py', size=200, overlap=20); print(paths)"
+rlm_progress(event="chunking_complete", details={file: "src/large_module.py", total_chunks: <N>})
 ```
-Splits the file into manageable chunks written to `.claude/rlm_state/chunks/`.
 
 ### 2. Delegate Each Chunk
-Send each chunk to the `rlm-subcall` sub-agent with:
+For each chunk, report progress before and after:
+```
+rlm_progress(event="chunk_dispatch", details={chunk: <i>, total_chunks: <N>, file: "src/large_module.py", agent: "rlm-subcall"})
+```
+Send the chunk to the `rlm-subcall` sub-agent with:
 - The chunk content (from `peek()` or the chunk file)
 - The user's query
 - A `chunk_id` (e.g., `"large_module.py:chunk_0"`)
 
+After sub-agent returns:
+```
+rlm_progress(event="chunk_complete", details={chunk: <i>, total_chunks: <N>, count: <relevant_items>, summary: "<brief>"})
+```
+
+If the sub-agent returned `suggested_next_queries`:
+```
+rlm_progress(event="queries_suggested", details={count: <N>})
+```
+
+If the sub-agent returned `answer_if_complete` (non-null):
+```
+rlm_progress(event="answer_found", details={summary: "<answer preview>"})
+```
+
 ### 3. Follow Suggested Queries
-The sub-agent returns `suggested_next_queries` — these are actionable RLM tool calls. Execute the highest-priority ones to fill in gaps identified in the `missing` field.
+Execute the highest-priority `suggested_next_queries` to fill gaps from the `missing` field.
 
 ### 4. Synthesize
-When a sub-agent returns `answer_if_complete` (non-null), or when all chunks have been analyzed, synthesize the collected `relevant` items and buffer contents into a final answer.
+```
+rlm_progress(event="synthesis_start", details={count: <total_findings>})
+```
+Synthesize the collected `relevant` items and buffer contents into a final answer.
+```
+rlm_progress(event="synthesis_complete", details={summary: "<what was found>"})
+```
 
 ### When to Use This Workflow
 - Files over 500 lines that need thorough analysis
 - Cross-file analysis spanning 5+ files
 - Architecture understanding tasks ("how does X work end-to-end?")
 - When a single `rlm_map` + `rlm_drill` cycle is insufficient
+
+### Enrichment Progress
+When dispatching to the `rlm-enricher` sub-agent for semantic summaries:
+```
+rlm_progress(event="chunk_dispatch", details={file: "<path>", agent: "rlm-enricher", query: "semantic enrichment"})
+```
+After enrichment returns:
+```
+rlm_progress(event="chunk_complete", details={file: "<path>", agent: "rlm-enricher", count: <symbols_enriched>, summary: "enriched <N> symbols"})
+```
 
 ## Document Navigation
 
