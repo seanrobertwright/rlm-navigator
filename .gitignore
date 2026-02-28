@@ -12,3 +12,5 @@ server/build/
 # Project state
 .claude/rlm_state/
 .rlm/
+# Worktrees
+.worktrees/
