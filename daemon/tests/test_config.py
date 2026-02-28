@@ -1,3 +1,4 @@
+import json
 import os
 import importlib
 import pytest
@@ -36,11 +37,9 @@ class TestConfig:
         try:
             cfg = self._fresh_config()
             assert cfg.anthropic_api_key == "sk-ant-test-key"
-            # enrichment_enabled depends on SDK being installed too
-            if cfg.anthropic_available:
-                assert cfg.enrichment_enabled is True
-            else:
-                assert cfg.enrichment_enabled is False
+            # Fallback: enrichment_enabled is True when key is set
+            assert cfg.enrichment_enabled is True
+            assert cfg.enrichment_provider == "anthropic"
         finally:
             del os.environ["ANTHROPIC_API_KEY"]
 
@@ -76,3 +75,99 @@ class TestConfig:
             assert cfg.pageindex_model == "gpt-4o-mini"
         finally:
             del os.environ["PAGEINDEX_MODEL"]
+
+
+class TestConfigFile:
+    """Tests for .rlm/config.json loading."""
+
+    def test_loads_enrichment_from_config_file(self, tmp_path):
+        """Config file should set provider, model, and resolve API key."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+        (rlm_dir / "config.json").write_text(json.dumps({
+            "enrichment": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key_env": "OPENAI_API_KEY"
+            }
+        }))
+        os.environ["OPENAI_API_KEY"] = "sk-test-openai"
+        try:
+            from config import RLMConfig
+            cfg = RLMConfig(root=str(tmp_path))
+            assert cfg.enrichment_provider == "openai"
+            assert cfg.enrichment_model == "gpt-4o-mini"
+            assert cfg.enrichment_api_key == "sk-test-openai"
+            assert cfg.enrichment_enabled is True
+        finally:
+            del os.environ["OPENAI_API_KEY"]
+
+    def test_missing_config_file_falls_back(self, tmp_path):
+        """Without config file, should fall back to ANTHROPIC_API_KEY env var."""
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-fallback"
+        try:
+            from config import RLMConfig
+            cfg = RLMConfig(root=str(tmp_path))
+            assert cfg.enrichment_provider == "anthropic"
+            assert cfg.enrichment_model == "claude-haiku-4-5-20251001"
+            assert cfg.enrichment_api_key == "sk-ant-fallback"
+        finally:
+            del os.environ["ANTHROPIC_API_KEY"]
+
+    def test_missing_api_key_disables_enrichment(self, tmp_path):
+        """Config file present but env var not set -> enrichment disabled."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+        (rlm_dir / "config.json").write_text(json.dumps({
+            "enrichment": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key_env": "OPENAI_API_KEY"
+            }
+        }))
+        old = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            from config import RLMConfig
+            cfg = RLMConfig(root=str(tmp_path))
+            assert cfg.enrichment_enabled is False
+            assert cfg.enrichment_api_key is None
+        finally:
+            if old is not None:
+                os.environ["OPENAI_API_KEY"] = old
+
+    def test_skip_provider_disables_enrichment(self, tmp_path):
+        """Provider set to null means enrichment is disabled."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+        (rlm_dir / "config.json").write_text(json.dumps({
+            "enrichment": {
+                "provider": None,
+                "model": None,
+                "api_key_env": None
+            }
+        }))
+        from config import RLMConfig
+        cfg = RLMConfig(root=str(tmp_path))
+        assert cfg.enrichment_enabled is False
+
+    def test_openrouter_provider(self, tmp_path):
+        """OpenRouter provider should work with its own env var."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+        (rlm_dir / "config.json").write_text(json.dumps({
+            "enrichment": {
+                "provider": "openrouter",
+                "model": "anthropic/claude-haiku-4-5",
+                "api_key_env": "OPENROUTER_API_KEY"
+            }
+        }))
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        try:
+            from config import RLMConfig
+            cfg = RLMConfig(root=str(tmp_path))
+            assert cfg.enrichment_provider == "openrouter"
+            assert cfg.enrichment_model == "anthropic/claude-haiku-4-5"
+            assert cfg.enrichment_api_key == "sk-or-test"
+            assert cfg.enrichment_enabled is True
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
