@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { execSync, spawnSync } = require("child_process");
 const net = require("net");
+const http = require("http");
 const readline = require("readline");
 const chalk = require("chalk");
 const ora = require("ora");
@@ -70,6 +71,13 @@ const ENRICHMENT_PROVIDERS = [
       { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
     ],
   },
+  {
+    name: "Ollama",
+    key: "ollama",
+    desc: "Local models",
+    api_key_env: null,
+    models: null,  // discovered dynamically
+  },
 ];
 
 function apiKeyInstructions(envVar) {
@@ -112,32 +120,64 @@ async function configureEnrichment() {
   }
 
   const provider = ENRICHMENT_PROVIDERS[providerIdx];
+  let modelId;
 
-  // Model selection
-  console.log("");
-  console.log(chalk.bold(`  ${provider.name} Models:`));
-  for (let i = 0; i < provider.models.length; i++) {
-    console.log(`  ${chalk.cyan(i + 1 + ")")} ${provider.models[i].label}`);
+  if (provider.models === null) {
+    // Dynamic model discovery (Ollama)
+    let discoverSpinner = step("Discovering local Ollama models...");
+    const discovered = await discoverOllamaModels();
+    discoverSpinner.stop();
+
+    if (discovered.length === 0) {
+      console.log(chalk.yellow("  No Ollama models detected."));
+      console.log(chalk.dim("  Install one with: ") + chalk.cyan("ollama pull llama3.2"));
+      console.log(chalk.dim("  Then re-run: ") + chalk.cyan("npx rlm-navigator install"));
+      console.log("");
+      return null;
+    }
+
+    console.log("");
+    console.log(chalk.bold(`  Ollama Models (locally available):`));
+    for (let i = 0; i < discovered.length; i++) {
+      console.log(`  ${chalk.cyan(i + 1 + ")")} ${discovered[i]}`);
+    }
+    console.log("");
+
+    const modelAnswer = await ask(chalk.cyan("  ? ") + "Select model " + chalk.dim(`[1-${discovered.length}] `));
+    const modelIdx = parseInt(modelAnswer, 10) - 1;
+    modelId = (modelIdx >= 0 && modelIdx < discovered.length)
+      ? discovered[modelIdx]
+      : discovered[0];
+  } else {
+    // Static model list (Anthropic, OpenAI, OpenRouter)
+    console.log("");
+    console.log(chalk.bold(`  ${provider.name} Models:`));
+    for (let i = 0; i < provider.models.length; i++) {
+      console.log(`  ${chalk.cyan(i + 1 + ")")} ${provider.models[i].label}`);
+    }
+    console.log("");
+
+    const modelAnswer = await ask(chalk.cyan("  ? ") + "Select model " + chalk.dim(`[1-${provider.models.length}] `));
+    const modelIdx = parseInt(modelAnswer, 10) - 1;
+    const model = (modelIdx >= 0 && modelIdx < provider.models.length)
+      ? provider.models[modelIdx]
+      : provider.models[0];
+    modelId = model.id;
   }
-  console.log("");
 
-  const modelAnswer = await ask(chalk.cyan("  ? ") + "Select model " + chalk.dim(`[1-${provider.models.length}] `));
-  const modelIdx = parseInt(modelAnswer, 10) - 1;
-  const model = (modelIdx >= 0 && modelIdx < provider.models.length)
-    ? provider.models[modelIdx]
-    : provider.models[0];
-
-  // API key instructions
-  console.log("");
-  const instructions = apiKeyInstructions(provider.api_key_env);
-  for (const line of instructions) {
-    console.log(line);
+  // API key instructions (skip for providers that don't need one)
+  if (provider.api_key_env) {
+    console.log("");
+    const instructions = apiKeyInstructions(provider.api_key_env);
+    for (const line of instructions) {
+      console.log(line);
+    }
+    console.log("");
   }
-  console.log("");
 
   return {
     provider: provider.key,
-    model: model.id,
+    model: modelId,
     api_key_env: provider.api_key_env,
   };
 }
@@ -154,6 +194,36 @@ function writeEnrichmentConfig(enrichment) {
   }
   config.enrichment = enrichment || { provider: null, model: null, api_key_env: null };
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+}
+
+function discoverOllamaModels() {
+  return new Promise((resolve) => {
+    // Try HTTP API first (requires Ollama server running)
+    const req = http.get("http://localhost:11434/api/tags", { timeout: 3000 }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          const models = (parsed.models || []).map((m) => m.name || m.model).filter(Boolean);
+          if (models.length > 0) return resolve(models);
+        } catch {}
+        resolve(discoverOllamaModelsCli());
+      });
+    });
+    req.on("error", () => resolve(discoverOllamaModelsCli()));
+    req.on("timeout", () => { req.destroy(); resolve(discoverOllamaModelsCli()); });
+  });
+}
+
+function discoverOllamaModelsCli() {
+  try {
+    const output = execSync("ollama list", { encoding: "utf-8", timeout: 5000 });
+    const lines = output.trim().split("\n").slice(1); // skip header row
+    return lines.map((line) => line.split(/\s+/)[0]).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function banner() {
