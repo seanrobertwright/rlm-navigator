@@ -270,3 +270,37 @@ class TestCallEnrichmentApi:
         mock_config.enrichment_api_key = "some-key"
         mock_config.enrichment_model = "some-model"
         assert call_enrichment_api("test", mock_config) is None
+
+    def test_ollama_dispatch(self):
+        """Should call openai SDK with Ollama base_url and dummy key."""
+        from unittest.mock import MagicMock, patch
+        import node_enricher
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = "ollama"
+        mock_config.enrichment_model = "llama3.2:latest"
+        mock_config.enrichment_api_key = None
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"foo": "bar"}'
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        mock_sdk = MagicMock()
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_sdk.OpenAI.return_value = mock_client
+
+        with patch.dict(node_enricher._sdk_cache, {"openai": mock_sdk}):
+            result = call_enrichment_api("test prompt", mock_config)
+            assert result == '{"foo": "bar"}'
+            mock_sdk.OpenAI.assert_called_once_with(
+                api_key="ollama",
+                base_url="http://localhost:11434/v1",
+            )
+            mock_client.chat.completions.create.assert_called_once_with(
+                model="llama3.2:latest",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "test prompt"}],
+            )

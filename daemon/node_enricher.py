@@ -16,6 +16,7 @@ _sdk_cache: dict[str, object] = {}
 _client_cache: dict[tuple, object] = {}
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 
 def _get_sdk(name: str):
@@ -52,7 +53,9 @@ def call_enrichment_api(prompt: str, config) -> Optional[str]:
     api_key = config.enrichment_api_key
     model = config.enrichment_model
 
-    if not provider or not api_key or not model:
+    if not provider or not model:
+        return None
+    if not api_key and provider != "ollama":
         return None
 
     if provider == "anthropic":
@@ -67,6 +70,15 @@ def call_enrichment_api(prompt: str, config) -> Optional[str]:
     elif provider in ("openai", "openrouter"):
         base_url = OPENROUTER_BASE_URL if provider == "openrouter" else None
         client = _get_client(provider, api_key, base_url)
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content
+
+    elif provider == "ollama":
+        client = _get_client("ollama", "ollama", OLLAMA_BASE_URL)
         response = client.chat.completions.create(
             model=model,
             max_tokens=1024,
