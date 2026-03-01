@@ -177,3 +177,21 @@ class TestConfigFile:
             assert cfg.enrichment_enabled is True
         finally:
             del os.environ["OPENROUTER_API_KEY"]
+
+    def test_ollama_provider_no_api_key(self, tmp_path):
+        """Ollama provider should enable enrichment without an API key."""
+        rlm_dir = tmp_path / ".rlm"
+        rlm_dir.mkdir()
+        (rlm_dir / "config.json").write_text(json.dumps({
+            "enrichment": {
+                "provider": "ollama",
+                "model": "llama3.2:latest",
+                "api_key_env": None
+            }
+        }))
+        from config import RLMConfig
+        cfg = RLMConfig(root=str(tmp_path))
+        assert cfg.enrichment_provider == "ollama"
+        assert cfg.enrichment_model == "llama3.2:latest"
+        assert cfg.enrichment_api_key is None
+        assert cfg.enrichment_enabled is True

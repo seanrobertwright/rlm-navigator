@@ -82,8 +82,11 @@ class RLMConfig:
 
     @property
     def enrichment_enabled(self) -> bool:
-        """Enrichment requires a provider and a resolved API key."""
-        return self.enrichment_provider is not None and self.enrichment_api_key is not None
+        """Enrichment requires a provider and a resolved API key (except Ollama)."""
+        provider = self.enrichment_provider
+        if provider == "ollama":
+            return True  # Local, no API key needed
+        return provider is not None and self.enrichment_api_key is not None
 
     @property
     def doc_indexing_enabled(self) -> bool:
