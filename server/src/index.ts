@@ -73,7 +73,7 @@ function spawnDaemon(): void {
 
   for (const cmd of ["python", "python3"]) {
     try {
-      const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT, "--idle-timeout", "300"], {
+      const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT, "--idle-timeout", "0"], {
         detached: true,
         stdio: "ignore",
       });
@@ -197,6 +197,11 @@ async function queryDaemonWithRetry(request: object, timeoutMs = 10000, retries 
       return await queryDaemon(request, timeoutMs);
     } catch (err: unknown) {
       if (isConnectionError(err) && attempt < retries - 1) {
+        // Clean stale state so spawnDaemon() doesn't short-circuit
+        const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
+        try { fs.unlinkSync(portFile); } catch {}
+        daemonChild = null;
+        spawning = false;
         spawnDaemon();
         const ok = await waitForDaemon();
         if (!ok) {
