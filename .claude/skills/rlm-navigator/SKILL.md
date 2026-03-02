@@ -9,10 +9,7 @@ Navigate codebases with minimal token usage by treating source files as hierarch
 ```
 get_status
 ```
-If offline, tell the user to start the daemon:
-```
-python daemon/rlm_daemon.py --root <project_path>
-```
+If offline or tools return errors, call `get_status` — the MCP server will auto-restart the daemon.
 
 ### 2. Explore Structure (never use `ls`, `find`, or `Glob`)
 ```
