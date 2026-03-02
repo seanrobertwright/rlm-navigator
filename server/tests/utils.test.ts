@@ -446,6 +446,21 @@ describe("isConnectionError", () => {
     expect(isConnectionError("string")).toBe(false);
     expect(isConnectionError(null)).toBe(false);
   });
+
+  test("returns true for ETIMEDOUT", () => {
+    const err = Object.assign(new Error("timed out"), { code: "ETIMEDOUT" });
+    expect(isConnectionError(err)).toBe(true);
+  });
+
+  test("returns true for ECONNABORTED", () => {
+    const err = Object.assign(new Error("aborted"), { code: "ECONNABORTED" });
+    expect(isConnectionError(err)).toBe(true);
+  });
+
+  test("returns true for timeout message without error code", () => {
+    const err = new Error("Daemon query timed out");
+    expect(isConnectionError(err)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -188,7 +188,14 @@ export function formatProgressMessage(event: string, details: ProgressDetails): 
 export function isConnectionError(err: unknown): err is NodeJS.ErrnoException {
   if (!(err instanceof Error)) return false;
   const code = (err as NodeJS.ErrnoException).code;
-  return code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EPIPE";
+  return (
+    code === "ECONNREFUSED" ||
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    code === "ETIMEDOUT" ||
+    code === "ECONNABORTED" ||
+    err.message.includes("timed out")
+  );
 }
 
 export function isPidAlive(pid: number): boolean {
