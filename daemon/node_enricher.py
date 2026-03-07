@@ -16,6 +16,7 @@ _sdk_cache: dict[str, object] = {}
 _client_cache: dict[tuple, object] = {}
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 
@@ -26,13 +27,17 @@ def _get_sdk(name: str):
     return _sdk_cache[name]
 
 
-def _get_client(provider: str, api_key: str, base_url: str | None = None):
+def _get_client(provider: str, api_key: str, base_url: str | None = None,
+                 auth_token: str | None = None):
     """Get or create a cached SDK client instance."""
-    key = (provider, api_key, base_url)
+    key = (provider, api_key, base_url, auth_token)
     if key not in _client_cache:
         if provider == "anthropic":
             sdk = _get_sdk("anthropic")
-            _client_cache[key] = sdk.Anthropic(api_key=api_key)
+            if auth_token:
+                _client_cache[key] = sdk.Anthropic(api_key=auth_token)
+            else:
+                _client_cache[key] = sdk.Anthropic(api_key=api_key)
         else:
             sdk = _get_sdk("openai")
             _client_cache[key] = sdk.OpenAI(api_key=api_key, base_url=base_url)
@@ -59,7 +64,8 @@ def call_enrichment_api(prompt: str, config) -> Optional[str]:
         return None
 
     if provider == "anthropic":
-        client = _get_client("anthropic", api_key)
+        auth_token = getattr(config, 'anthropic_auth_token', None)
+        client = _get_client("anthropic", api_key, auth_token=auth_token)
         response = client.messages.create(
             model=model,
             max_tokens=1024,
@@ -70,6 +76,15 @@ def call_enrichment_api(prompt: str, config) -> Optional[str]:
     elif provider in ("openai", "openrouter"):
         base_url = OPENROUTER_BASE_URL if provider == "openrouter" else None
         client = _get_client(provider, api_key, base_url)
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content
+
+    elif provider == "gemini":
+        client = _get_client("gemini", api_key, GEMINI_BASE_URL)
         response = client.chat.completions.create(
             model=model,
             max_tokens=1024,

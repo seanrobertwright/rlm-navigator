@@ -177,6 +177,7 @@ class TestCallEnrichmentApi:
         mock_config.enrichment_provider = "anthropic"
         mock_config.enrichment_model = "claude-haiku-4-5-20251001"
         mock_config.enrichment_api_key = "sk-ant-test"
+        mock_config.anthropic_auth_token = None
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock(text='{"foo": "bar"}')]
@@ -195,6 +196,31 @@ class TestCallEnrichmentApi:
                 max_tokens=1024,
                 messages=[{"role": "user", "content": "test prompt"}],
             )
+
+    def test_anthropic_dispatch_with_auth_token(self):
+        """Should use auth token instead of API key when available."""
+        from unittest.mock import MagicMock, patch
+        import node_enricher
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = "anthropic"
+        mock_config.enrichment_model = "claude-haiku-4-5-20251001"
+        mock_config.enrichment_api_key = "auth-token-value"
+        mock_config.anthropic_auth_token = "auth-token-value"
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"foo": "bar"}')]
+
+        mock_sdk = MagicMock()
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+        mock_sdk.Anthropic.return_value = mock_client
+
+        with patch.dict(node_enricher._sdk_cache, {"anthropic": mock_sdk}):
+            result = call_enrichment_api("test prompt", mock_config)
+            assert result == '{"foo": "bar"}'
+            mock_sdk.Anthropic.assert_called_once_with(api_key="auth-token-value")
 
     def test_openai_dispatch(self):
         """Should call openai SDK for openai provider."""
@@ -221,6 +247,32 @@ class TestCallEnrichmentApi:
             result = call_enrichment_api("test prompt", mock_config)
             assert result == '{"foo": "bar"}'
             mock_sdk.OpenAI.assert_called_once_with(api_key="sk-test", base_url=None)
+
+    def test_openai_dispatch_with_auth_token(self):
+        """Should work identically with auth token (SDK treats it as api_key)."""
+        from unittest.mock import MagicMock, patch
+        import node_enricher
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = "openai"
+        mock_config.enrichment_model = "gpt-4o-mini"
+        mock_config.enrichment_api_key = "auth-token-value"
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"foo": "bar"}'
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        mock_sdk = MagicMock()
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_sdk.OpenAI.return_value = mock_client
+
+        with patch.dict(node_enricher._sdk_cache, {"openai": mock_sdk}):
+            result = call_enrichment_api("test prompt", mock_config)
+            assert result == '{"foo": "bar"}'
+            mock_sdk.OpenAI.assert_called_once_with(api_key="auth-token-value", base_url=None)
 
     def test_openrouter_dispatch(self):
         """Should call openai SDK with OpenRouter base_url."""
@@ -260,13 +312,47 @@ class TestCallEnrichmentApi:
         mock_config.enrichment_provider = None
         assert call_enrichment_api("test", mock_config) is None
 
+    def test_gemini_dispatch(self):
+        """Should call openai SDK with Gemini base_url."""
+        from unittest.mock import MagicMock, patch
+        import node_enricher
+        from node_enricher import call_enrichment_api
+
+        mock_config = MagicMock()
+        mock_config.enrichment_provider = "gemini"
+        mock_config.enrichment_model = "gemini-2.0-flash"
+        mock_config.enrichment_api_key = "gemini-test-key"
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"foo": "bar"}'
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        mock_sdk = MagicMock()
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_sdk.OpenAI.return_value = mock_client
+
+        with patch.dict(node_enricher._sdk_cache, {"openai": mock_sdk}):
+            result = call_enrichment_api("test prompt", mock_config)
+            assert result == '{"foo": "bar"}'
+            mock_sdk.OpenAI.assert_called_once_with(
+                api_key="gemini-test-key",
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            )
+            mock_client.chat.completions.create.assert_called_once_with(
+                model="gemini-2.0-flash",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": "test prompt"}],
+            )
+
     def test_unknown_provider_returns_none(self):
         """Should return None for unrecognized provider strings."""
         from unittest.mock import MagicMock
         from node_enricher import call_enrichment_api
 
         mock_config = MagicMock()
-        mock_config.enrichment_provider = "gemini"
+        mock_config.enrichment_provider = "unknown_provider"
         mock_config.enrichment_api_key = "some-key"
         mock_config.enrichment_model = "some-model"
         assert call_enrichment_api("test", mock_config) is None

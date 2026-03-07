@@ -24,6 +24,7 @@ class RLMConfig:
         self._root = root
         # Legacy env vars (kept for backward compat + doc indexing)
         self.anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")
+        self.anthropic_auth_token: str | None = os.environ.get("ANTHROPIC_AUTH_TOKEN")
         self.openai_api_key: str | None = os.environ.get("CHATGPT_API_KEY")
         self.pageindex_model: str = os.environ.get("PAGEINDEX_MODEL", "gpt-4o-2024-11-20")
         self._pageindex_available = _UNCHECKED
@@ -57,8 +58,8 @@ class RLMConfig:
     def enrichment_provider(self) -> str | None:
         if self._config_loaded:
             return self._enrichment_provider
-        # Fallback: if ANTHROPIC_API_KEY is set, assume anthropic
-        if self.anthropic_api_key:
+        # Fallback: if ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is set, assume anthropic
+        if self.anthropic_api_key or self.anthropic_auth_token:
             return "anthropic"
         return None
 
@@ -67,18 +68,38 @@ class RLMConfig:
         if self._config_loaded:
             return self._enrichment_model
         # Fallback default
-        if self.anthropic_api_key:
+        if self.anthropic_api_key or self.anthropic_auth_token:
             return _DEFAULT_ANTHROPIC_MODEL
         return None
+
+    @property
+    def openai_auth_token(self) -> str | None:
+        """Read OPENAI_AUTH_TOKEN from environment (bearer token auth for OpenAI)."""
+        return os.environ.get("OPENAI_AUTH_TOKEN")
 
     @property
     def enrichment_api_key(self) -> str | None:
         if self._config_loaded:
             if self._enrichment_api_key_env:
+                # For anthropic provider, prefer auth token over API key
+                if self._enrichment_provider == "anthropic":
+                    token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+                    if token:
+                        return token
+                # For openai provider, prefer auth token over API key
+                if self._enrichment_provider == "openai" and self.openai_auth_token:
+                    return self.openai_auth_token
                 return os.environ.get(self._enrichment_api_key_env)
+            # No env var name in config, but check auth tokens
+            if self._enrichment_provider == "anthropic":
+                token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+                if token:
+                    return token
+            if self._enrichment_provider == "openai" and self.openai_auth_token:
+                return self.openai_auth_token
             return None  # Config loaded but no env var name -> no key
-        # Fallback: no config file, use ANTHROPIC_API_KEY directly
-        return self.anthropic_api_key
+        # Fallback: no config file, prefer auth token over API key
+        return self.anthropic_auth_token or self.anthropic_api_key
 
     @property
     def enrichment_enabled(self) -> bool:

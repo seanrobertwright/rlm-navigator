@@ -41,22 +41,36 @@ const ENRICHMENT_PROVIDERS = [
   {
     name: "Anthropic",
     key: "anthropic",
-    desc: "Claude Haiku 4.5",
+    desc: "Claude Haiku 4.5 (API key or auth token)",
     api_key_env: "ANTHROPIC_API_KEY",
+    alt_auth_env: "ANTHROPIC_AUTH_TOKEN",
     models: [
       { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (recommended)" },
       { id: "claude-sonnet-4-5-20250514", label: "Claude Sonnet 4.5" },
+      { id: "claude-sonnet-4-6-20260620", label: "Claude Sonnet 4.6" },
     ],
   },
   {
     name: "OpenAI",
     key: "openai",
-    desc: "GPT-4o-mini, GPT-4o, GPT-4.1-mini",
+    desc: "GPT-4o-mini, GPT-4o, GPT-4.1-mini (API key or auth token)",
     api_key_env: "OPENAI_API_KEY",
+    alt_auth_env: "OPENAI_AUTH_TOKEN",
     models: [
       { id: "gpt-4o-mini", label: "GPT-4o-mini (recommended)" },
       { id: "gpt-4o", label: "GPT-4o" },
       { id: "gpt-4.1-mini", label: "GPT-4.1-mini" },
+    ],
+  },
+  {
+    name: "Gemini",
+    key: "gemini",
+    desc: "Gemini 2.0 Flash, Gemini 2.5 Pro",
+    api_key_env: "GEMINI_API_KEY",
+    models: [
+      { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (recommended)" },
+      { id: "gemini-2.5-pro-preview-06-05", label: "Gemini 2.5 Pro" },
+      { id: "gemini-2.5-flash-preview-05-20", label: "Gemini 2.5 Flash" },
     ],
   },
   {
@@ -171,6 +185,15 @@ async function configureEnrichment() {
     const instructions = apiKeyInstructions(provider.api_key_env);
     for (const line of instructions) {
       console.log(line);
+    }
+    if (provider.alt_auth_env) {
+      console.log("");
+      console.log(chalk.bold("  Or use a bearer/auth token instead:"));
+      const altInstructions = apiKeyInstructions(provider.alt_auth_env);
+      for (const line of altInstructions) {
+        console.log(line);
+      }
+      console.log(chalk.dim("  (Auth token takes precedence over API key when both are set)"));
     }
     console.log("");
   }
