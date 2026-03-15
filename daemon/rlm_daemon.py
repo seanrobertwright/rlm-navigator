@@ -837,6 +837,50 @@ def _handle_request_inner(data: bytes, cache: SkeletonCache, root: str, repl: RL
             stats.record_progress(event, details)
         return json.dumps({"ok": True}).encode("utf-8")
 
+    elif action == "enrich":
+        path = req.get("path", "")
+        abs_path = str((root_path / path).resolve())
+        if not abs_path.startswith(str(root_path)):
+            return json.dumps({"error": "Path outside project root"}).encode("utf-8")
+        skeleton = cache.get(abs_path)
+        if skeleton is None:
+            return json.dumps({"error": f"File not found or unsupported: {path}"}).encode("utf-8")
+
+        from config import RLMConfig
+        from node_enricher import (
+            parse_skeleton_symbols, build_enrichment_prompt,
+            call_enrichment_api, merge_enrichments, _parse_enrichment_response,
+        )
+        cfg = RLMConfig(root=root)
+        if not cfg.enrichment_enabled:
+            return json.dumps({"error": "Enrichment not enabled (no API key configured)"}).encode("utf-8")
+
+        symbols = parse_skeleton_symbols(skeleton)
+        if not symbols:
+            return json.dumps({"skeleton": skeleton, "enrichments": {}, "note": "No symbols found"}).encode("utf-8")
+
+        prompt = build_enrichment_prompt(path, symbols)
+        try:
+            raw = call_enrichment_api(prompt, cfg)
+            if raw is None:
+                return json.dumps({"error": "Enrichment API returned None"}).encode("utf-8")
+            enrichments = _parse_enrichment_response(raw)
+            enriched_skeleton = merge_enrichments(skeleton, enrichments)
+            response = json.dumps({
+                "skeleton": skeleton,
+                "enriched_skeleton": enriched_skeleton,
+                "enrichments": enrichments,
+                "symbols_sent": len(symbols),
+                "symbols_enriched": len(enrichments) if enrichments else 0,
+                "provider": cfg.enrichment_provider,
+                "model": cfg.enrichment_model,
+            }).encode("utf-8")
+            if stats:
+                stats.record("enrich", len(response))
+            return response
+        except Exception as e:
+            return json.dumps({"error": f"Enrichment failed: {str(e)}"}).encode("utf-8")
+
     elif action == "shutdown":
         if shutdown_event is None:
             return json.dumps({"error": "Shutdown not available"}).encode("utf-8")
