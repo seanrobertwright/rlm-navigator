@@ -825,6 +825,23 @@ function status() {
   }
   console.log(`  Installed:   ${chalk.green("✔ Yes")}`);
 
+  // Check session-start hook registration
+  const settingsPath = path.join(CWD, ".claude", "settings.json");
+  let hookRegistered = false;
+  if (fs.existsSync(settingsPath)) {
+    try {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+      hookRegistered = (settings.hooks?.SessionStart || []).some((entry) =>
+        (entry.hooks || []).some((h) => h.command && h.command.includes("rlm-session-start"))
+      );
+    } catch {}
+  }
+  if (hookRegistered) {
+    console.log(`  Start hook:  ${chalk.green("✔ Registered")}`);
+  } else {
+    console.log(`  Start hook:  ${chalk.yellow("✖ Missing")} ${chalk.dim("(run install to fix)")}`);
+  }
+
   const lockFile = path.join(RLM_DIR, "daemon.lock");
   const portFile = path.join(RLM_DIR, "port");
   let port = null;
