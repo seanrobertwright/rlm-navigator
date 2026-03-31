@@ -56,6 +56,7 @@ function resolveProjectRoot(): string {
 const PROJECT_ROOT = resolveProjectRoot();
 
 let daemonChild: ChildProcess | null = null;
+let daemonStderrPath: string | null = null;
 
 function getDaemonPort(): number | null {
   return getDaemonPortFromRoot(PROJECT_ROOT, process.env.RLM_DAEMON_PORT);
@@ -64,46 +65,60 @@ function getDaemonPort(): number | null {
 let spawning = false;
 
 function spawnDaemon(): void {
-  if (daemonChild || spawning) return; // Already spawned or in progress
+  if (daemonChild || spawning) return;
 
   const daemonScript = path.join(PROJECT_ROOT, ".rlm", "daemon", "rlm_daemon.py");
   if (!fs.existsSync(daemonScript)) return;
 
   spawning = true;
+  daemonStderrPath = path.join(PROJECT_ROOT, ".rlm", "daemon-start.log");
 
   for (const cmd of ["python", "python3"]) {
     try {
-      const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT, "--idle-timeout", "0"], {
-        detached: true,
-        stdio: "ignore",
-      });
-      child.unref();
-      daemonChild = child;
-      return;
+      const stderrFd = fs.openSync(daemonStderrPath, "w");
+      try {
+        const child = spawn(cmd, [daemonScript, "--root", PROJECT_ROOT, "--idle-timeout", "0"], {
+          detached: true,
+          stdio: ["ignore", "ignore", stderrFd],
+        });
+        child.unref();
+        daemonChild = child;
+        return;
+      } catch (err) {
+        // Write spawn error to log file for diagnostics
+        try {
+          fs.writeFileSync(daemonStderrPath, `Failed to spawn with '${cmd}': ${err}\n`, { flag: "a" });
+        } catch {}
+        continue;
+      } finally {
+        fs.closeSync(stderrFd);
+      }
     } catch {
       continue;
     }
   }
-  // If we get here, both python commands failed
   spawning = false;
 }
 
-async function waitForDaemon(maxWaitMs = 10000): Promise<boolean> {
+async function waitForDaemon(maxWaitMs = 20000): Promise<boolean> {
   const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
   const start = Date.now();
 
   // Phase 1: Wait for port file to appear
+  console.error("[RLM] Waiting for port file...");
   while (Date.now() - start < maxWaitMs) {
     await sleep(300);
     if (fs.existsSync(portFile)) break;
   }
 
   if (!fs.existsSync(portFile)) {
+    console.error("[RLM] Port file not found after timeout");
     spawning = false;
     return false;
   }
 
   // Phase 2: Verify daemon is actually listening and serving the right project
+  console.error("[RLM] Port file found, verifying root...");
   await sleep(200); // Brief pause for TCP listener to start
   try {
     const status = await queryDaemon({ action: "status" }, 5000);
