@@ -14,7 +14,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, ChildProcess } from "node:child_process";
+import { spawn, execSync, ChildProcess } from "node:child_process";
 import {
   truncateResponse,
   formatSize,
@@ -205,6 +205,66 @@ async function validateDaemonRoot(): Promise<void> {
   return validationPromise;
 }
 
+function gatherDiagnostics(): string {
+  const parts: string[] = [];
+
+  // Check daemon script
+  const daemonScript = path.join(PROJECT_ROOT, ".rlm", "daemon", "rlm_daemon.py");
+  parts.push(`daemon_script=${fs.existsSync(daemonScript) ? "exists" : "missing"}`);
+
+  // Check Python availability
+  let pythonFound = "not_found";
+  for (const cmd of ["python", "python3"]) {
+    try {
+      execSync(`${cmd} --version`, { stdio: "pipe" });
+      pythonFound = `found(${cmd})`;
+      break;
+    } catch {}
+  }
+  parts.push(`python=${pythonFound}`);
+
+  // Check port file
+  const portFile = path.join(PROJECT_ROOT, ".rlm", "port");
+  if (fs.existsSync(portFile)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(portFile, "utf-8"));
+      const alive = data.pid ? isPidAlive(data.pid) : "no_pid";
+      parts.push(`port_file=exists(port=${data.port},pid=${data.pid},alive=${alive})`);
+    } catch {
+      parts.push("port_file=exists(parse_error)");
+    }
+  } else {
+    parts.push("port_file=missing");
+  }
+
+  // Check lock file
+  const lockFile = path.join(PROJECT_ROOT, ".rlm", "daemon.lock");
+  if (fs.existsSync(lockFile)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(lockFile, "utf-8"));
+      const alive = data.pid ? isPidAlive(data.pid) : "no_pid";
+      parts.push(`lock_file=exists(pid=${data.pid},alive=${alive})`);
+    } catch {
+      parts.push("lock_file=exists(parse_error)");
+    }
+  } else {
+    parts.push("lock_file=missing");
+  }
+
+  // Check daemon stderr log
+  if (daemonStderrPath) {
+    try {
+      const log = fs.readFileSync(daemonStderrPath, "utf-8").trim();
+      if (log) {
+        const lastKb = log.slice(-1024);
+        parts.push(`spawn_stderr=${JSON.stringify(lastKb)}`);
+      }
+    } catch {}
+  }
+
+  return parts.join(", ");
+}
+
 async function queryDaemonWithRetry(request: object, timeoutMs = 10000, retries = 3): Promise<any> {
   await validateDaemonRoot();
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -220,7 +280,12 @@ async function queryDaemonWithRetry(request: object, timeoutMs = 10000, retries 
         spawnDaemon();
         const ok = await waitForDaemon();
         if (!ok) {
-          throw new Error("Failed to start daemon after spawn attempt");
+          const diag = gatherDiagnostics();
+          throw new Error(
+            `Failed to start daemon after spawn attempt.\n` +
+            `Diagnostics: ${diag}\n` +
+            `Run 'npx rlm-navigator status' to diagnose further.`
+          );
         }
         continue;
       }
