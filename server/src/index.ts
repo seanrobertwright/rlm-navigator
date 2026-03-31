@@ -330,7 +330,7 @@ function checkHealth(): Promise<boolean> {
 
 const server = new McpServer({
   name: "rlm-navigator",
-  version: "2.0.0",
+  version: "2.1.0",
 });
 
 // --- get_status ---
