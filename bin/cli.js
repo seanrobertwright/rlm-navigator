@@ -455,10 +455,11 @@ function registerMcpServer() {
 }
 
 function registerHook() {
-  let spinner = step("Registering session-end hook...");
+  let spinner = step("Registering session hooks...");
   try {
-    installHook();
-    spinner.succeed("Session-end hook registered");
+    installHook("SessionStart", "rlm-session-start.js");
+    installHook("SessionEnd", "rlm-session-end.js");
+    spinner.succeed("Session hooks registered (start + end)");
   } catch (err) {
     spinner.warn("Hook registration failed: " + err.message);
   }
@@ -544,11 +545,11 @@ function isPidAlive(pid) {
 // Hook Helpers
 // ---------------------------------------------------------------------------
 
-function installHook() {
+function installHook(hookType, hookFilename) {
   // 1. Copy hook file
-  const srcHook = path.join(PKG_ROOT, "hooks", "rlm-session-end.js");
+  const srcHook = path.join(PKG_ROOT, "hooks", hookFilename);
   const destHookDir = path.join(RLM_DIR, "hooks");
-  const destHook = path.join(destHookDir, "rlm-session-end.js");
+  const destHook = path.join(destHookDir, hookFilename);
   fs.mkdirSync(destHookDir, { recursive: true });
   fs.copyFileSync(srcHook, destHook);
 
@@ -564,15 +565,15 @@ function installHook() {
   }
 
   if (!settings.hooks) settings.hooks = {};
-  if (!Array.isArray(settings.hooks.SessionEnd)) settings.hooks.SessionEnd = [];
+  if (!Array.isArray(settings.hooks[hookType])) settings.hooks[hookType] = [];
 
   const hookCmd = `node "${destHook.replace(/\\/g, "/")}"`;
-  const alreadyRegistered = settings.hooks.SessionEnd.some((entry) =>
-    (entry.hooks || []).some((h) => h.command && h.command.includes("rlm-session-end"))
+  const alreadyRegistered = settings.hooks[hookType].some((entry) =>
+    (entry.hooks || []).some((h) => h.command && h.command.includes(hookFilename))
   );
 
   if (!alreadyRegistered) {
-    settings.hooks.SessionEnd.push({
+    settings.hooks[hookType].push({
       hooks: [{ type: "command", command: hookCmd }],
     });
   }
@@ -581,7 +582,7 @@ function installHook() {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 }
 
-function uninstallHook() {
+function uninstallHook(hookType, hookFilename) {
   const settingsPath = path.join(CWD, ".claude", "settings.json");
   if (!fs.existsSync(settingsPath)) return;
 
@@ -592,12 +593,12 @@ function uninstallHook() {
     return;
   }
 
-  if (settings.hooks && Array.isArray(settings.hooks.SessionEnd)) {
-    settings.hooks.SessionEnd = settings.hooks.SessionEnd.filter((entry) =>
-      !(entry.hooks || []).some((h) => h.command && h.command.includes("rlm-session-end"))
+  if (settings.hooks && Array.isArray(settings.hooks[hookType])) {
+    settings.hooks[hookType] = settings.hooks[hookType].filter((entry) =>
+      !(entry.hooks || []).some((h) => h.command && h.command.includes(hookFilename))
     );
-    if (settings.hooks.SessionEnd.length === 0) {
-      delete settings.hooks.SessionEnd;
+    if (settings.hooks[hookType].length === 0) {
+      delete settings.hooks[hookType];
     }
     if (Object.keys(settings.hooks).length === 0) {
       delete settings.hooks;
@@ -734,12 +735,13 @@ function uninstall() {
     spinner.succeed("MCP registration removed");
   }
 
-  // 2. Remove session-end hook
+  // 2. Remove session hooks
   let spinner;
-  spinner = step("Removing session-end hook...");
+  spinner = step("Removing session hooks...");
   try {
-    uninstallHook();
-    spinner.succeed("Session-end hook removed");
+    uninstallHook("SessionStart", "rlm-session-start.js");
+    uninstallHook("SessionEnd", "rlm-session-end.js");
+    spinner.succeed("Session hooks removed");
   } catch (err) {
     spinner.warn("Hook removal failed: " + err.message);
   }
