@@ -145,6 +145,11 @@ async function main() {
         console.log(`[RLM] Daemon PID ${pid} alive but unresponsive, killing...`);
         forceKill(pid);
         cleanFiles(rlmDir);
+      } else {
+        // PID alive but no port known — kill and re-spawn
+        console.log(`[RLM] Daemon PID ${pid} alive but no port file, killing...`);
+        forceKill(pid);
+        cleanFiles(rlmDir);
       }
     } else {
       // PID dead — clean stale files
