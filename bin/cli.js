@@ -898,17 +898,31 @@ function status() {
     client.destroy();
     console.log(`  Daemon:      ${chalk.red("● OFFLINE")} ${chalk.dim("(timeout)")}`);
     console.log("");
-  }, 2000);
+  }, 5000);
 
   client.connect(port, "127.0.0.1", () => {
+    // Send status query for a fast response (bare connections wait 5s for daemon timeout)
+    client.write(JSON.stringify({ action: "status" }));
+    let buf = "";
     client.on("data", (chunk) => {
+      buf += chunk.toString("utf-8");
+    });
+    client.on("end", () => {
       clearTimeout(timer);
-      const msg = chunk.toString("utf-8");
       client.destroy();
-      if (msg.includes("ALIVE")) {
-        console.log(`  Daemon:      ${chalk.green("● ONLINE")}`);
-      } else {
-        console.log(`  Daemon:      ${chalk.yellow("● UNKNOWN")}`);
+      try {
+        const resp = JSON.parse(buf);
+        if (resp.status === "alive") {
+          console.log(`  Daemon:      ${chalk.green("● ONLINE")}`);
+        } else {
+          console.log(`  Daemon:      ${chalk.yellow("● UNKNOWN")}`);
+        }
+      } catch {
+        if (buf.includes("ALIVE")) {
+          console.log(`  Daemon:      ${chalk.green("● ONLINE")}`);
+        } else {
+          console.log(`  Daemon:      ${chalk.yellow("● UNKNOWN")}`);
+        }
       }
       console.log("");
     });

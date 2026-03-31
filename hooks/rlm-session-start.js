@@ -65,20 +65,33 @@ function cleanFiles(rlmDir) {
   }
 }
 
-function healthCheck(port, timeoutMs = 2000) {
+function healthCheck(port, timeoutMs = 5000) {
   return new Promise((resolve) => {
     const client = new net.Socket();
+    let buf = "";
     const timer = setTimeout(() => {
       client.destroy();
       resolve(false);
     }, timeoutMs);
 
     client.connect(port, "127.0.0.1", () => {
-      client.on("data", (chunk) => {
-        clearTimeout(timer);
-        client.destroy();
-        resolve(chunk.toString("utf-8").includes("ALIVE"));
-      });
+      // Send status query for fast response (bare connections wait 5s for daemon timeout)
+      client.write(JSON.stringify({ action: "status" }));
+    });
+
+    client.on("data", (chunk) => {
+      buf += chunk.toString("utf-8");
+    });
+
+    client.on("end", () => {
+      clearTimeout(timer);
+      client.destroy();
+      try {
+        const resp = JSON.parse(buf);
+        resolve(resp.status === "alive");
+      } catch {
+        resolve(buf.includes("ALIVE"));
+      }
     });
 
     client.on("error", () => {

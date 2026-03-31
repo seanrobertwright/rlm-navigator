@@ -302,19 +302,30 @@ function checkHealth(): Promise<boolean> {
       return;
     }
     const client = new net.Socket();
+    let buf = "";
     const timer = setTimeout(() => {
       client.destroy();
       resolve(false);
-    }, 2000);
+    }, 5000);
 
     client.connect(port, DAEMON_HOST, () => {
-      // Daemon sends ALIVE on bare connection
-      client.on("data", (chunk) => {
-        clearTimeout(timer);
-        const msg = chunk.toString("utf-8");
-        client.destroy();
-        resolve(msg.includes("ALIVE"));
-      });
+      // Send status query for fast response (bare connections wait 5s for daemon timeout)
+      client.write(JSON.stringify({ action: "status" }));
+    });
+
+    client.on("data", (chunk) => {
+      buf += chunk.toString("utf-8");
+    });
+
+    client.on("end", () => {
+      clearTimeout(timer);
+      client.destroy();
+      try {
+        const parsed = JSON.parse(buf);
+        resolve(parsed.status === "alive");
+      } catch {
+        resolve(buf.includes("ALIVE"));
+      }
     });
 
     client.on("error", () => {
