@@ -1,17 +1,17 @@
 {
   "type": "excalidraw",
   "version": 2,
-  "source": "rlm-navigator",
+  "source": "https://marketplace.visualstudio.com/items?itemName=pomdtr.excalidraw-editor",
   "elements": [
     {
       "id": "title",
       "type": "text",
-      "x": 340,
-      "y": 20,
-      "width": 400,
-      "height": 45,
+      "x": 216.5424041748047,
+      "y": 11.462491035461362,
+      "width": 640.915283203125,
+      "height": 52.537505149841294,
       "text": "RLM Navigator — Architecture",
-      "fontSize": 36,
+      "fontSize": 42.030004119873034,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "top",
@@ -23,11 +23,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1,
-      "version": 1,
-      "versionNonce": 1,
+      "version": 176,
+      "versionNonce": 222675547,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993457604,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -36,7 +36,9 @@
       "containerId": null,
       "originalText": "RLM Navigator — Architecture",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "a0",
+      "strokeStyle": "solid"
     },
     {
       "id": "claude-code-box",
@@ -53,21 +55,37 @@
       "opacity": 100,
       "angle": 0,
       "seed": 100,
-      "version": 1,
-      "versionNonce": 100,
+      "version": 2,
+      "versionNonce": 218817781,
       "isDeleted": false,
       "boundElements": [
-        { "id": "cc-label", "type": "text" },
-        { "id": "arrow-cc-to-mcp", "type": "arrow" },
-        { "id": "arrow-skill-to-cc", "type": "arrow" },
-        { "id": "arrow-cc-to-subagent", "type": "arrow" }
+        {
+          "id": "cc-label",
+          "type": "text"
+        },
+        {
+          "id": "arrow-cc-to-mcp",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow-skill-to-cc",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow-cc-to-subagent",
+          "type": "arrow"
+        }
       ],
-      "updated": 1,
+      "updated": 1774993383346,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "a1",
+      "strokeStyle": "solid"
     },
     {
       "id": "cc-label",
@@ -89,11 +107,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 101,
-      "version": 1,
-      "versionNonce": 101,
+      "version": 2,
+      "versionNonce": 1228525787,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383346,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -102,7 +120,9 @@
       "containerId": "claude-code-box",
       "originalText": "Claude Code\n(AI Agent — invokes MCP tools)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "a2",
+      "strokeStyle": "solid"
     },
     {
       "id": "skill-box",
@@ -119,19 +139,29 @@
       "opacity": 100,
       "angle": 0,
       "seed": 200,
-      "version": 1,
-      "versionNonce": 200,
+      "version": 2,
+      "versionNonce": 1554808405,
       "isDeleted": false,
       "boundElements": [
-        { "id": "skill-label", "type": "text" },
-        { "id": "arrow-skill-to-cc", "type": "arrow" }
+        {
+          "id": "skill-label",
+          "type": "text"
+        },
+        {
+          "id": "arrow-skill-to-cc",
+          "type": "arrow"
+        }
       ],
-      "updated": 1,
+      "updated": 1774993383346,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "a3",
+      "strokeStyle": "solid"
     },
     {
       "id": "skill-label",
@@ -153,11 +183,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 201,
-      "version": 1,
-      "versionNonce": 201,
+      "version": 2,
+      "versionNonce": 1897987451,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383346,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -166,7 +196,9 @@
       "containerId": "skill-box",
       "originalText": "Skill (SKILL.md)\nEnforces workflow:\n1. rlm_tree\n2. rlm_map\n3. rlm_drill\n4. rlm_search",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "a4",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-skill-to-cc",
@@ -183,21 +215,43 @@
       "opacity": 100,
       "angle": 0,
       "seed": 202,
-      "version": 1,
-      "versionNonce": 202,
+      "version": 2,
+      "versionNonce": 1804856245,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [48, 0]],
-      "startBinding": { "elementId": "skill-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "claude-code-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          48,
+          0
+        ]
+      ],
+      "startBinding": {
+        "elementId": "skill-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "claude-code-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "a5",
+      "strokeStyle": "solid"
     },
     {
       "id": "subagent-box",
@@ -214,19 +268,29 @@
       "opacity": 100,
       "angle": 0,
       "seed": 250,
-      "version": 1,
-      "versionNonce": 250,
+      "version": 2,
+      "versionNonce": 951686683,
       "isDeleted": false,
       "boundElements": [
-        { "id": "subagent-label", "type": "text" },
-        { "id": "arrow-cc-to-subagent", "type": "arrow" }
+        {
+          "id": "subagent-label",
+          "type": "text"
+        },
+        {
+          "id": "arrow-cc-to-subagent",
+          "type": "arrow"
+        }
       ],
-      "updated": 1,
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "a6",
+      "strokeStyle": "solid"
     },
     {
       "id": "subagent-label",
@@ -248,11 +312,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 251,
-      "version": 1,
-      "versionNonce": 251,
+      "version": 2,
+      "versionNonce": 2045160725,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -261,7 +325,9 @@
       "containerId": "subagent-box",
       "originalText": "Sub-Agents\nrlm-subcall (Haiku)\n→ Chunk analysis\nrlm-enricher\n→ Semantic summaries",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "a7",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-cc-to-subagent",
@@ -278,29 +344,51 @@
       "opacity": 100,
       "angle": 0,
       "seed": 252,
-      "version": 1,
-      "versionNonce": 252,
+      "version": 2,
+      "versionNonce": 2130057915,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [46, 0]],
-      "startBinding": { "elementId": "claude-code-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "subagent-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          46,
+          0
+        ]
+      ],
+      "startBinding": {
+        "elementId": "claude-code-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "subagent-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "a8",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-cc-to-mcp",
       "type": "arrow",
       "x": 540,
-      "y": 182,
+      "y": 180.34199505157676,
       "width": 0,
-      "height": 46,
+      "height": 49.23784322340376,
       "strokeColor": "#1971c2",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
@@ -309,21 +397,43 @@
       "opacity": 100,
       "angle": 0,
       "seed": 300,
-      "version": 1,
-      "versionNonce": 300,
+      "version": 64,
+      "versionNonce": 1555960917,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993390384,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [0, 46]],
-      "startBinding": { "elementId": "claude-code-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "mcp-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          49.23784322340376
+        ]
+      ],
+      "startBinding": {
+        "elementId": "claude-code-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "mcp-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "a9",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-cc-to-mcp-label",
@@ -345,11 +455,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 301,
-      "version": 1,
-      "versionNonce": 301,
+      "version": 2,
+      "versionNonce": 544803675,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -358,7 +468,9 @@
       "containerId": null,
       "originalText": "MCP tool calls (stdio)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aA",
+      "strokeStyle": "solid"
     },
     {
       "id": "mcp-box",
@@ -375,28 +487,41 @@
       "opacity": 100,
       "angle": 0,
       "seed": 400,
-      "version": 1,
-      "versionNonce": 400,
+      "version": 63,
+      "versionNonce": 238597525,
       "isDeleted": false,
       "boundElements": [
-        { "id": "mcp-label", "type": "text" },
-        { "id": "arrow-cc-to-mcp", "type": "arrow" },
-        { "id": "arrow-mcp-to-daemon", "type": "arrow" }
+        {
+          "id": "mcp-label",
+          "type": "text"
+        },
+        {
+          "id": "arrow-cc-to-mcp",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow-mcp-to-daemon",
+          "type": "arrow"
+        }
       ],
-      "updated": 1,
+      "updated": 1774993390383,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aB",
+      "strokeStyle": "solid"
     },
     {
       "id": "mcp-label",
       "type": "text",
-      "x": 305,
-      "y": 240,
-      "width": 470,
-      "height": 80,
+      "x": 377.29913330078125,
+      "y": 245,
+      "width": 325.4017333984375,
+      "height": 70,
       "text": "MCP Server (TypeScript — server/src/index.ts)\nPort discovery (.rlm/port) · Auto-spawn daemon\n10 tools: tree, map, drill, search, doc_map,\ndoc_drill, assess, chunks, chunk, repl_*",
       "fontSize": 14,
       "fontFamily": 1,
@@ -410,11 +535,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 401,
-      "version": 1,
-      "versionNonce": 401,
+      "version": 64,
+      "versionNonce": 122018523,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993390384,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -423,15 +548,17 @@
       "containerId": "mcp-box",
       "originalText": "MCP Server (TypeScript — server/src/index.ts)\nPort discovery (.rlm/port) · Auto-spawn daemon\n10 tools: tree, map, drill, search, doc_map,\ndoc_drill, assess, chunks, chunk, repl_*",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aC",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-mcp-to-daemon",
       "type": "arrow",
       "x": 540,
-      "y": 332,
+      "y": 330.42016172501957,
       "width": 0,
-      "height": 46,
+      "height": 49.03039601918567,
       "strokeColor": "#2f9e44",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
@@ -440,21 +567,43 @@
       "opacity": 100,
       "angle": 0,
       "seed": 500,
-      "version": 1,
-      "versionNonce": 500,
+      "version": 64,
+      "versionNonce": 1696319355,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993390384,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [0, 46]],
-      "startBinding": { "elementId": "mcp-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "daemon-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          49.03039601918567
+        ]
+      ],
+      "startBinding": {
+        "elementId": "mcp-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "daemon-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "aD",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-mcp-to-daemon-label",
@@ -476,11 +625,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 501,
-      "version": 1,
-      "versionNonce": 501,
+      "version": 2,
+      "versionNonce": 1481388187,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -489,7 +638,9 @@
       "containerId": null,
       "originalText": "TCP JSON (127.0.0.1:9177-9196)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aE",
+      "strokeStyle": "solid"
     },
     {
       "id": "daemon-box",
@@ -506,19 +657,29 @@
       "opacity": 100,
       "angle": 0,
       "seed": 600,
-      "version": 1,
-      "versionNonce": 600,
+      "version": 2,
+      "versionNonce": 1178663573,
       "isDeleted": false,
       "boundElements": [
-        { "id": "daemon-label", "type": "text" },
-        { "id": "arrow-mcp-to-daemon", "type": "arrow" }
+        {
+          "id": "daemon-label",
+          "type": "text"
+        },
+        {
+          "id": "arrow-mcp-to-daemon",
+          "type": "arrow"
+        }
       ],
-      "updated": 1,
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aF",
+      "strokeStyle": "solid"
     },
     {
       "id": "daemon-label",
@@ -540,11 +701,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 601,
-      "version": 1,
-      "versionNonce": 601,
+      "version": 2,
+      "versionNonce": 1985045819,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -553,7 +714,9 @@
       "containerId": "daemon-box",
       "originalText": "Python Daemon (daemon/rlm_daemon.py)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aG",
+      "strokeStyle": "solid"
     },
     {
       "id": "cache-box",
@@ -570,16 +733,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 610,
-      "version": 1,
-      "versionNonce": 610,
+      "version": 2,
+      "versionNonce": 1573838837,
       "isDeleted": false,
-      "boundElements": [{ "id": "cache-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "cache-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aH",
+      "strokeStyle": "solid"
     },
     {
       "id": "cache-label",
@@ -601,11 +773,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 611,
-      "version": 1,
-      "versionNonce": 611,
+      "version": 2,
+      "versionNonce": 1392969179,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -614,7 +786,9 @@
       "containerId": "cache-box",
       "originalText": "SkeletonCache\n(in-memory)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aI",
+      "strokeStyle": "solid"
     },
     {
       "id": "watcher-box",
@@ -631,16 +805,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 620,
-      "version": 1,
-      "versionNonce": 620,
+      "version": 2,
+      "versionNonce": 154736981,
       "isDeleted": false,
-      "boundElements": [{ "id": "watcher-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "watcher-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aJ",
+      "strokeStyle": "solid"
     },
     {
       "id": "watcher-label",
@@ -662,11 +845,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 621,
-      "version": 1,
-      "versionNonce": 621,
+      "version": 2,
+      "versionNonce": 360682107,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -675,7 +858,9 @@
       "containerId": "watcher-box",
       "originalText": "File Watcher\n(Watchdog)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aK",
+      "strokeStyle": "solid"
     },
     {
       "id": "chunks-box",
@@ -692,16 +877,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 630,
-      "version": 1,
-      "versionNonce": 630,
+      "version": 2,
+      "versionNonce": 836052661,
       "isDeleted": false,
-      "boundElements": [{ "id": "chunks-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "chunks-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aL",
+      "strokeStyle": "solid"
     },
     {
       "id": "chunks-label",
@@ -723,11 +917,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 631,
-      "version": 1,
-      "versionNonce": 631,
+      "version": 2,
+      "versionNonce": 1585285915,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -736,7 +930,9 @@
       "containerId": "chunks-box",
       "originalText": "ChunkStore\n(.rlm/chunks/)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aM",
+      "strokeStyle": "solid"
     },
     {
       "id": "repl-box",
@@ -753,16 +949,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 640,
-      "version": 1,
-      "versionNonce": 640,
+      "version": 2,
+      "versionNonce": 2051573781,
       "isDeleted": false,
-      "boundElements": [{ "id": "repl-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "repl-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aN",
+      "strokeStyle": "solid"
     },
     {
       "id": "repl-label",
@@ -784,11 +989,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 641,
-      "version": 1,
-      "versionNonce": 641,
+      "version": 2,
+      "versionNonce": 309555131,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -797,7 +1002,9 @@
       "containerId": "repl-box",
       "originalText": "REPL\n(rlm_repl.py)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aO",
+      "strokeStyle": "solid"
     },
     {
       "id": "stats-box",
@@ -814,16 +1021,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 650,
-      "version": 1,
-      "versionNonce": 650,
+      "version": 2,
+      "versionNonce": 344505717,
       "isDeleted": false,
-      "boundElements": [{ "id": "stats-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "stats-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aP",
+      "strokeStyle": "solid"
     },
     {
       "id": "stats-label",
@@ -845,11 +1061,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 651,
-      "version": 1,
-      "versionNonce": 651,
+      "version": 2,
+      "versionNonce": 1669578843,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -858,7 +1074,9 @@
       "containerId": "stats-box",
       "originalText": "SessionStats\n(token tracking)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aQ",
+      "strokeStyle": "solid"
     },
     {
       "id": "squeezer-box",
@@ -875,16 +1093,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 700,
-      "version": 1,
-      "versionNonce": 700,
+      "version": 2,
+      "versionNonce": 1473988309,
       "isDeleted": false,
-      "boundElements": [{ "id": "squeezer-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "squeezer-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aR",
+      "strokeStyle": "solid"
     },
     {
       "id": "squeezer-label",
@@ -906,11 +1133,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 701,
-      "version": 1,
-      "versionNonce": 701,
+      "version": 2,
+      "versionNonce": 461438203,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -919,7 +1146,9 @@
       "containerId": "squeezer-box",
       "originalText": "Squeezer (squeezer.py)\nAST Parser (tree-sitter)\nPy·JS·TS·Go·Rust·\nJava·C·C++",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aS",
+      "strokeStyle": "solid"
     },
     {
       "id": "docidx-box",
@@ -936,16 +1165,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 710,
-      "version": 1,
-      "versionNonce": 710,
+      "version": 2,
+      "versionNonce": 383099957,
       "isDeleted": false,
-      "boundElements": [{ "id": "docidx-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "docidx-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aT",
+      "strokeStyle": "solid"
     },
     {
       "id": "docidx-label",
@@ -967,11 +1205,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 711,
-      "version": 1,
-      "versionNonce": 711,
+      "version": 2,
+      "versionNonce": 636331419,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -980,7 +1218,9 @@
       "containerId": "docidx-box",
       "originalText": "DocIndexer\n(doc_indexer.py)\n.md · .pdf · .txt · .rst",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aU",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-daemon-to-squeezer",
@@ -997,21 +1237,43 @@
       "opacity": 100,
       "angle": 0,
       "seed": 720,
-      "version": 1,
-      "versionNonce": 720,
+      "version": 2,
+      "versionNonce": 895309205,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [0, 48]],
-      "startBinding": { "elementId": "daemon-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "squeezer-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          48
+        ]
+      ],
+      "startBinding": {
+        "elementId": "daemon-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "squeezer-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "aV",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-daemon-to-docidx",
@@ -1028,21 +1290,43 @@
       "opacity": 100,
       "angle": 0,
       "seed": 730,
-      "version": 1,
-      "versionNonce": 730,
+      "version": 2,
+      "versionNonce": 1509702203,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [0, 48]],
-      "startBinding": { "elementId": "daemon-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "docidx-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          48
+        ]
+      ],
+      "startBinding": {
+        "elementId": "daemon-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "docidx-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "aW",
+      "strokeStyle": "solid"
     },
     {
       "id": "fs-box",
@@ -1059,16 +1343,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 800,
-      "version": 1,
-      "versionNonce": 800,
+      "version": 2,
+      "versionNonce": 2124929781,
       "isDeleted": false,
-      "boundElements": [{ "id": "fs-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "fs-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aX",
+      "strokeStyle": "solid"
     },
     {
       "id": "fs-label",
@@ -1090,11 +1383,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 801,
-      "version": 1,
-      "versionNonce": 801,
+      "version": 2,
+      "versionNonce": 76495579,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1103,7 +1396,9 @@
       "containerId": "fs-box",
       "originalText": "File System\nProject source files · .rlm/ (port, lock, chunks, config)",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aY",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-squeezer-to-fs",
@@ -1120,28 +1415,50 @@
       "opacity": 100,
       "angle": 0,
       "seed": 810,
-      "version": 1,
-      "versionNonce": 810,
+      "version": 2,
+      "versionNonce": 993702997,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [80, 46]],
-      "startBinding": { "elementId": "squeezer-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "fs-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          80,
+          46
+        ]
+      ],
+      "startBinding": {
+        "elementId": "squeezer-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "fs-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "aZ",
+      "strokeStyle": "solid"
     },
     {
       "id": "arrow-docidx-to-fs",
       "type": "arrow",
       "x": 700,
       "y": 692,
-      "width": -80,
+      "width": 80,
       "height": 46,
       "strokeColor": "#495057",
       "backgroundColor": "transparent",
@@ -1151,21 +1468,43 @@
       "opacity": 100,
       "angle": 0,
       "seed": 820,
-      "version": 1,
-      "versionNonce": 820,
+      "version": 2,
+      "versionNonce": 842606459,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [-80, 46]],
-      "startBinding": { "elementId": "docidx-box", "focus": 0, "gap": 2 },
-      "endBinding": { "elementId": "fs-box", "focus": 0, "gap": 2 },
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -80,
+          46
+        ]
+      ],
+      "startBinding": {
+        "elementId": "docidx-box",
+        "focus": 0,
+        "gap": 2
+      },
+      "endBinding": {
+        "elementId": "fs-box",
+        "focus": 0,
+        "gap": 2
+      },
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "aa",
+      "strokeStyle": "solid"
     },
     {
       "id": "cli-box",
@@ -1182,16 +1521,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 900,
-      "version": 1,
-      "versionNonce": 900,
+      "version": 2,
+      "versionNonce": 116089269,
       "isDeleted": false,
-      "boundElements": [{ "id": "cli-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "cli-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "ab",
+      "strokeStyle": "solid"
     },
     {
       "id": "cli-label",
@@ -1213,11 +1561,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 901,
-      "version": 1,
-      "versionNonce": 901,
+      "version": 2,
+      "versionNonce": 960266267,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1226,7 +1574,9 @@
       "containerId": "cli-box",
       "originalText": "CLI (bin/cli.js)\nnpx rlm-navigator\ninstall | uninstall\nupdate | status\nCopies files → .rlm/",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "ac",
+      "strokeStyle": "solid"
     },
     {
       "id": "hook-box",
@@ -1243,16 +1593,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 950,
-      "version": 1,
-      "versionNonce": 950,
+      "version": 2,
+      "versionNonce": 1725915925,
       "isDeleted": false,
-      "boundElements": [{ "id": "hook-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "hook-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "ad",
+      "strokeStyle": "solid"
     },
     {
       "id": "hook-label",
@@ -1274,11 +1633,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 951,
-      "version": 1,
-      "versionNonce": 951,
+      "version": 2,
+      "versionNonce": 59491515,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1287,7 +1646,9 @@
       "containerId": "hook-box",
       "originalText": "Session-End Hook\n(hooks/rlm-session-end.js)\nCleans up stale daemon",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "ae",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-title",
@@ -1309,11 +1670,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1000,
-      "version": 1,
-      "versionNonce": 1000,
+      "version": 2,
+      "versionNonce": 529283189,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1322,7 +1683,9 @@
       "containerId": null,
       "originalText": "Navigation Flow:",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "af",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-step1",
@@ -1339,16 +1702,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1010,
-      "version": 1,
-      "versionNonce": 1010,
+      "version": 2,
+      "versionNonce": 415855963,
       "isDeleted": false,
-      "boundElements": [{ "id": "flow-step1-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "flow-step1-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "ag",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-step1-label",
@@ -1370,11 +1742,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1011,
-      "version": 1,
-      "versionNonce": 1011,
+      "version": 2,
+      "versionNonce": 1253532117,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1383,7 +1755,9 @@
       "containerId": "flow-step1",
       "originalText": "1. rlm_tree",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "ah",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-arrow1",
@@ -1400,19 +1774,35 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1012,
-      "version": 1,
-      "versionNonce": 1012,
+      "version": 2,
+      "versionNonce": 1749553659,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [16, 0]],
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          16,
+          0
+        ]
+      ],
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "ai",
+      "strokeStyle": "solid",
+      "startBinding": null,
+      "endBinding": null
     },
     {
       "id": "flow-step2",
@@ -1429,16 +1819,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1020,
-      "version": 1,
-      "versionNonce": 1020,
+      "version": 2,
+      "versionNonce": 762732341,
       "isDeleted": false,
-      "boundElements": [{ "id": "flow-step2-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "flow-step2-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "aj",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-step2-label",
@@ -1460,11 +1859,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1021,
-      "version": 1,
-      "versionNonce": 1021,
+      "version": 2,
+      "versionNonce": 1393171099,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1473,7 +1872,9 @@
       "containerId": "flow-step2",
       "originalText": "2. rlm_map",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "ak",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-arrow2",
@@ -1490,19 +1891,35 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1022,
-      "version": 1,
-      "versionNonce": 1022,
+      "version": 2,
+      "versionNonce": 1311682709,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [16, 0]],
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          16,
+          0
+        ]
+      ],
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "al",
+      "strokeStyle": "solid",
+      "startBinding": null,
+      "endBinding": null
     },
     {
       "id": "flow-step3",
@@ -1519,16 +1936,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1030,
-      "version": 1,
-      "versionNonce": 1030,
+      "version": 2,
+      "versionNonce": 1975652155,
       "isDeleted": false,
-      "boundElements": [{ "id": "flow-step3-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "flow-step3-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "am",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-step3-label",
@@ -1550,11 +1976,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1031,
-      "version": 1,
-      "versionNonce": 1031,
+      "version": 2,
+      "versionNonce": 1251333621,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1563,7 +1989,9 @@
       "containerId": "flow-step3",
       "originalText": "3. rlm_drill",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "an",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-step4",
@@ -1580,16 +2008,25 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1040,
-      "version": 1,
-      "versionNonce": 1040,
+      "version": 2,
+      "versionNonce": 852651995,
       "isDeleted": false,
-      "boundElements": [{ "id": "flow-step4-label", "type": "text" }],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "flow-step4-label",
+          "type": "text"
+        }
+      ],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 3 }
+      "roundness": {
+        "type": 3
+      },
+      "index": "ao",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-step4-label",
@@ -1611,11 +2048,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1041,
-      "version": 1,
-      "versionNonce": 1041,
+      "version": 2,
+      "versionNonce": 1840336725,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1624,7 +2061,9 @@
       "containerId": "flow-step4",
       "originalText": "4. rlm_search",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "ap",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-desc",
@@ -1646,11 +2085,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1050,
-      "version": 1,
-      "versionNonce": 1050,
+      "version": 2,
+      "versionNonce": 2085469307,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1659,7 +2098,9 @@
       "containerId": null,
       "originalText": "tree → structure overview\nmap → AST skeletons (no bodies)\ndrill → surgical symbol read\nsearch → cross-file symbol find",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "aq",
+      "strokeStyle": "solid"
     },
     {
       "id": "chunk-flow-title",
@@ -1681,11 +2122,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1060,
-      "version": 1,
-      "versionNonce": 1060,
+      "version": 2,
+      "versionNonce": 97950901,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1694,7 +2135,9 @@
       "containerId": null,
       "originalText": "Chunk-Delegate-Synthesize:",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "ar",
+      "strokeStyle": "solid"
     },
     {
       "id": "flow-arrow3",
@@ -1711,19 +2154,35 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1045,
-      "version": 1,
-      "versionNonce": 1045,
+      "version": 2,
+      "versionNonce": 1576432923,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
       "frameId": null,
-      "roundness": { "type": 2 },
-      "points": [[0, 0], [16, 0]],
+      "roundness": {
+        "type": 2
+      },
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          16,
+          0
+        ]
+      ],
       "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "endArrowhead": "arrow",
+      "lastCommittedPoint": null,
+      "index": "as",
+      "strokeStyle": "solid",
+      "startBinding": null,
+      "endBinding": null
     },
     {
       "id": "chunk-flow-desc",
@@ -1745,11 +2204,11 @@
       "opacity": 100,
       "angle": 0,
       "seed": 1061,
-      "version": 1,
-      "versionNonce": 1061,
+      "version": 2,
+      "versionNonce": 2058042901,
       "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
+      "boundElements": [],
+      "updated": 1774993383347,
       "link": null,
       "locked": false,
       "groupIds": [],
@@ -1758,11 +2217,15 @@
       "containerId": null,
       "originalText": "1. REPL chunks large file\n2. Each chunk → rlm-subcall agent\n3. Agent returns JSON findings\n4. Synthesize all chunk results\n5. Export via rlm_repl_export",
       "autoResize": true,
-      "lineHeight": 1.25
+      "lineHeight": 1.25,
+      "index": "at",
+      "strokeStyle": "solid"
     }
   ],
   "appState": {
-    "gridSize": null,
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
     "viewBackgroundColor": "#ffffff"
   },
   "files": {}
